@@ -19,6 +19,8 @@ from tools.research_tools import (
     NumericalTool, UnitConverterTool, LatexFormatterTool,
 )
 from tools.builtin_tools import CalculatorTool, WebSearchTool
+from tools.research_skills import ResearchSkillsTool
+
 
 
 # ---------------------------------------------------------------------
@@ -58,7 +60,9 @@ def literature_scout(
             "  (what is still unresolved or actively researched)\n\n"
 
             "Be specific - name papers, authors, equations. "
-            "Never make up citations. Only report what the tools return."
+            "Never make up citations. Only report what the tools return.\n\n"
+            "You have access to the 'research_skills' tool. Use it with 'literature_critique' "
+            "or 'gap_finder' to map paper lineages, critique claims, and identify novel study topics/gaps."
         ),
         temperature = 0.2,
         verbose     = verbose,
@@ -66,6 +70,7 @@ def literature_scout(
     agent.register_tool(ArxivSearchTool(max_results=4))
     agent.register_tool(WikipediaTool(sentences=12))
     agent.register_tool(WebSearchTool(max_results=3))
+    agent.register_tool(ResearchSkillsTool())
     return agent
 
 
@@ -269,11 +274,14 @@ def peer_reviewer(
             "  ## Major Issues (must fix)\n"
             "  ## Minor Issues (should fix)\n"
             "  ## Strengths\n"
-            "  ## Specific Recommendations\n"
+            "  ## Specific Recommendations\n\n"
+            "You have access to the 'research_skills' tool. Use it with 'literature_critique' "
+            "(steel-man / critical objections) or 'academic_refinement' (devil's advocate) to critique findings."
         ),
         temperature = 0.3,
         verbose     = verbose,
     )
+    agent.register_tool(ResearchSkillsTool())
     return agent
 
 
@@ -317,11 +325,14 @@ def synthesizer(
             "  (what is still unknown or needs verification)\n\n"
 
             "Be integrative - your output should be MORE than the sum of its parts. "
-            "The goal is to make all findings coherent and usable."
+            "The goal is to make all findings coherent and usable.\n\n"
+            "You have access to the 'research_skills' tool. Use it with 'synthesis_drafter' "
+            "or 'concept_mapper' (argument chain) to organize common threads and explain concepts."
         ),
         temperature = 0.4,
         verbose     = verbose,
     )
+    agent.register_tool(ResearchSkillsTool())
     return agent
 
 
@@ -368,10 +379,14 @@ def report_writer(
             "  * Every number must have units\n"
             "  * No bullet points in the main body - write in prose\n"
             "  * Use passive voice for methodology descriptions\n"
-            "  * Be complete - the report should stand alone"
+            "  * Be complete - the report should stand alone\n\n"
+            "You have access to the 'research_skills' tool. Use it with 'academic_refinement' "
+            "(for abstract rewrite or brief) or 'synthesis_drafter' (for related works draft) "
+            "to structure and refine the report sections."
         ),
         temperature = 0.4,
         verbose     = verbose,
     )
     agent.register_tool(LatexFormatterTool())
+    agent.register_tool(ResearchSkillsTool())
     return agent

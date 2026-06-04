@@ -75,6 +75,18 @@ To prevent the common `UnicodeEncodeError` crashes on Windows terminals defaulti
 * **Short-Term Memory**: Conversation history inside the context window is managed via either a **Sliding Window** (dropping old messages) or **Summarization** (running the agent's LLM to compress the oldest half of the history into bullet points).
 * **Long-Term Memory**: Backed by a local JSON file (`long_term_memory.json`). It persists direct facts (key-value) and searchable text notes, using keyword-overlap matching to rank and inject relevant context on initialization.
 
+### F. Consolidated Research Skills Toolkit
+For targeted academic workflows, the system features a consolidated Research Skills Toolkit (`tools/research_skills.py`). This toolkit collapses 13 granular research prompts into 5 high-value academic operations:
+* **literature_critique**: Claims, Objections, & Steel-manning (identifies 5 key claims, steel-mans the weakest argument, and raises 5 skeptic objections).
+* **gap_finder**: Unresolved Questions & Research Question Generator (extracts 7 unresolved limits/gaps and designs 10 feasible, novel research questions).
+* **synthesis_drafter**: Notes Cleaner & Related Works Drafter (cleans summaries/notes, forms a central synthesis claim, and drafts a LaTeX Related Works section).
+* **concept_mapper**: Technical Explainer & Logical Argument Chain (explains complex concepts via analogy and maps the paper's logical structure from premise to conclusion).
+* **academic_refinement**: Abstract Rewrite, Devil's Advocate, and One-Page Brief (rewrites abstracts into a 4-sentence format, plays devil's advocate against findings, and drafts concise briefs).
+
+#### Dual-Integration Design:
+1. **Interactive Menu (CLI)**: Selecting `[4] UTILITIES` lets users run any of the 5 skills directly on custom text inputs or load from files, saving structured markdown outputs to `./reports/`.
+2. **Autonomous Multi-Agent Loop**: The `LiteratureScout`, `PeerReviewer`, `Synthesizer`, and `ReportWriter` agents are native tool-equipped with these skills, automatically executing them to critique literature, steel-man proofs, build argument maps, and edit reports during the research pipeline.
+
 ---
 
 ## 3. Why It is Better Than Basic Agent Systems
@@ -108,6 +120,7 @@ MAS/
 │   ├── __init__.py          # Exports tools
 │   ├── base_tool.py         # Abstract BaseTool template
 │   ├── builtin_tools.py     # Calculator and Web Search tools
+│   ├── research_skills.py   # Consolidated Academic Research Skills Toolkit
 │   └── research_tools.py    # Math, SciPy, Converter, Arxiv, and Wikipedia tools
 │
 ├── memory/

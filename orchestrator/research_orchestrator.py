@@ -208,7 +208,9 @@ class ResearchOrchestrator:
             f"Research Plan:\n{self.doc['understand']}\n\n"
             f"Search for papers and background on this topic. "
             f"Focus on: governing equations, key results, state of the art, "
-            f"and the most relevant authors/papers."
+            f"and the most relevant authors/papers.\n\n"
+            f"You have the 'research_skills' tool. Use it with 'literature_critique' "
+            f"or 'gap_finder' to map paper lineages, critique claims, and identify novel study topics/gaps."
         )
         result = self._run_agent(agent, task)
         self.doc["literature"] = result
@@ -299,7 +301,10 @@ class ResearchOrchestrator:
             f"Review the following research findings as a journal peer reviewer:\n\n"
             f"{all_findings}\n\n"
             f"Provide a rigorous review covering: scientific validity, completeness, "
-            f"dimensional consistency, missing considerations, and specific improvements."
+            f"dimensional consistency, missing considerations, and specific improvements.\n\n"
+            f"You have the 'research_skills' tool. Use it with 'literature_critique' "
+            f"(specifically to steel-man the weakest point and generate objections) "
+            f"or 'academic_refinement' (devil's advocate) on these findings."
         )
         result = self._run_agent(agent, task)
         self.doc["review"] = result
@@ -325,7 +330,9 @@ class ResearchOrchestrator:
             f"coherent knowledge summary that fully answers the research question.\n\n"
             f"{all_content}\n\n"
             f"Resolve any contradictions. Incorporate review feedback. "
-            f"Make the synthesis self-contained and complete."
+            f"Make the synthesis self-contained and complete.\n\n"
+            f"You have the 'research_skills' tool. Use it with 'synthesis_drafter' "
+            f"or 'concept_mapper' (specifically to extract the argument chain) to build the synthesis."
         )
         result = self._run_agent(agent, task)
         self.doc["synthesis"] = result
@@ -351,7 +358,10 @@ class ResearchOrchestrator:
             f"Produce a full report with Abstract, Introduction, Theory/Background, "
             f"Analysis, Results, Discussion, and Conclusion. "
             f"Format all equations in LaTeX. Include units on every number. "
-            f"Write in formal academic prose."
+            f"Write in formal academic prose.\n\n"
+            f"You have the 'research_skills' tool. Use it with 'academic_refinement' "
+            f"(for abstract rewrite or brief) or 'synthesis_drafter' (for related works draft) "
+            f"to structure and refine the report sections."
         )
         result = self._run_agent(agent, task)
         self.doc["report"] = result

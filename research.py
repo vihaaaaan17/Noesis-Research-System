@@ -50,7 +50,7 @@ def get_input(prompt: str) -> str:
 
 def print_depth_menu():
     print(f"""
-{Fore.YELLOW}Select research depth:{Style.RESET_ALL}
+{Fore.YELLOW}Select option:{Style.RESET_ALL}
 
   {Fore.GREEN}[1] QUICK{Style.RESET_ALL}     - Literature + Computation + Report
               Best for: quick overviews, known topics
@@ -63,6 +63,9 @@ def print_depth_menu():
   {Fore.GREEN}[3] DEEP{Style.RESET_ALL}      - All 8 phases including peer review
               Best for: novel questions, publishable-quality output
               Phases: + Review + Synthesis
+
+  {Fore.CYAN}[4] UTILITIES{Style.RESET_ALL} - Research Skills Toolkit (Interactive 5-in-1 Tool)
+              Run paper critique, gap analysis, synthesis, etc.
 
   {Fore.WHITE}[q] Quit{Style.RESET_ALL}
 """)
@@ -169,6 +172,107 @@ def demo_tools():
     print(w.run("Gallium nitride"))
 
 
+def run_skills_toolkit():
+    import os
+    import time
+    from tools.research_skills import ResearchSkillsTool
+
+    skills_map = {
+        "1": ("literature_critique", "Literature Critique (Claims, Steel-man, Objections)"),
+        "2": ("gap_finder", "Gap Finder (Unresolved questions, Study topics)"),
+        "3": ("synthesis_drafter", "Synthesis Drafter (Notes cleaner, Related works section)"),
+        "4": ("concept_mapper", "Concept Mapper (Concept explanation, Analogies, Argument chain)"),
+        "5": ("academic_refinement", "Academic Refinement (Abstract rewrite, Devil's advocate, Brief)")
+    }
+
+    while True:
+        print(f"\n{Fore.CYAN}=== RESEARCH SKILLS TOOLKIT ==={Style.RESET_ALL}")
+        print("Select a consolidated academic skill to execute:")
+        for k, v in skills_map.items():
+            print(f"  {Fore.GREEN}[{k}]{Style.RESET_ALL} {v[1]}")
+        print(f"  {Fore.WHITE}[b] Back to main menu{Style.RESET_ALL}\n")
+
+        choice = get_input("Choose skill -> ")
+        if choice.lower() == 'b' or not choice:
+            break
+
+        if choice not in skills_map:
+            print(f"{Fore.RED}Invalid choice.{Style.RESET_ALL}")
+            continue
+
+        skill_key, skill_desc = skills_map[choice]
+        print(f"\n{Fore.YELLOW}Selected: {skill_desc}{Style.RESET_ALL}")
+        print("Please enter/paste your text below, or enter a valid file path to read from:")
+        
+        # Collect multi-line text input or a single path
+        user_text = get_input("Text or File Path -> ")
+        if not user_text:
+            print(f"{Fore.RED}No input provided.{Style.RESET_ALL}")
+            continue
+
+        # Check if file path
+        if os.path.isfile(user_text):
+            try:
+                print(f"{Fore.CYAN}Reading from file: {user_text}...{Style.RESET_ALL}")
+                with open(user_text, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception as e:
+                print(f"{Fore.RED}Error reading file: {e}{Style.RESET_ALL}")
+                continue
+        else:
+            content = user_text
+
+        if not content.strip():
+            print(f"{Fore.RED}Content is empty.{Style.RESET_ALL}")
+            continue
+
+        print(f"\n{Fore.CYAN}Invoking academic intelligence loop...{Style.RESET_ALL}")
+        tool = ResearchSkillsTool()
+        result = tool.run(f"{skill_key} | {content}")
+
+        # Display result beautifully
+        print(f"\n{Fore.GREEN}{'='*60}")
+        print(f"{Fore.GREEN}ANALYSIS RESULT - {skill_desc.upper()}")
+        print(f"{Fore.GREEN}{'='*60}{Style.RESET_ALL}")
+        print(result)
+        print(f"{Fore.GREEN}{'='*60}{Style.RESET_ALL}")
+
+        # Offer to save
+        save_choice = get_input("\nSave this analysis to a report file? (y/n, default y) -> ").lower()
+        if save_choice != 'n':
+            os.makedirs("reports", exist_ok=True)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"reports/skill_analysis_{skill_key}_{timestamp}.md"
+            
+            report_content = f"""# Research Skills Toolkit Analysis
+- **Skill Applied:** {skill_desc}
+- **Timestamp:** {time.strftime('%Y-%m-%d %H:%M:%S')}
+
+---
+
+## Output Result
+
+{result}
+
+---
+## Input Analyzed
+```text
+{content[:1000]}...
+```
+"""
+            try:
+                with open(filename, "w", encoding="utf-8") as f:
+                    f.write(report_content)
+                print(f"{Fore.GREEN}Saved successfully to: {filename}{Style.RESET_ALL}")
+            except Exception as e:
+                print(f"{Fore.RED}Failed to save report: {e}{Style.RESET_ALL}")
+
+        # Ask to run another skill
+        again = get_input("\nRun another toolkit analysis? (y/n, default y) -> ").lower()
+        if again == 'n':
+            break
+
+
 # ---------------------------------------------------------------------
 # Main interactive loop
 # ---------------------------------------------------------------------
@@ -188,9 +292,13 @@ def main():
             demo_tools()
             continue
 
+        if choice == "4":
+            run_skills_toolkit()
+            continue
+
         depth_map = {"1": "quick", "2": "standard", "3": "deep"}
         if choice not in depth_map:
-            print(f"{Fore.RED}Invalid choice. Enter 1, 2, 3, or q.{Style.RESET_ALL}")
+            print(f"{Fore.RED}Invalid choice. Enter 1, 2, 3, 4, or q.{Style.RESET_ALL}")
             continue
 
         depth = depth_map[choice]

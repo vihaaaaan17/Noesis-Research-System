@@ -4,3 +4,5 @@ from .research_tools import (
     ArxivSearchTool, WikipediaTool, SymPyTool,
     NumericalTool, UnitConverterTool, LatexFormatterTool
 )
+from .research_skills import ResearchSkillsTool
+
