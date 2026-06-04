@@ -1,0 +1,25 @@
+# Environment variables / API Keys
+.env
+.env.*
+
+# Python caches and compiles
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE and Editor configurations
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Memory and local cache files
+long_term_memory.json
+memory/system_memory.json
+
+# Local generated research reports
+reports/*.md
+!reports/README.md

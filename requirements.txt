@@ -1,0 +1,16 @@
+# Core
+google-generativeai==0.8.3
+python-dotenv==1.0.0
+colorama==0.4.6
+
+# Web search (free, no key)
+duckduckgo-search==6.2.6
+
+# Research tools
+arxiv==2.1.0
+wikipedia-api==0.6.0
+
+# Mathematics
+sympy==1.13.1
+numpy==2.0.0
+scipy==1.14.0
