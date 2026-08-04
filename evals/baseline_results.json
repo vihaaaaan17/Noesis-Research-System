@@ -1,40 +1,58 @@
 {
-  "timestamp": "2026-08-05 00:03:55",
-  "total_duration_sec": 0.002,
-  "average_entity_recall": 1.0,
-  "average_f1_score": 0.574,
-  "kg_final_nodes": 19,
-  "kg_final_edges": 3,
+  "timestamp": "2026-08-05 00:24:50",
+  "total_duration_sec": 939.77,
+  "summary": {
+    "entity_recall_with_kg": 0.5556,
+    "entity_recall_without_kg": 0.0,
+    "entity_recall_gain_pct": 55.56,
+    "keyword_recall_with_kg": 0.8,
+    "keyword_recall_without_kg": 0.0556,
+    "f1_score_with_kg": 0.2628,
+    "f1_score_without_kg": 0.0473,
+    "avg_graph_nodes": 42.0
+  },
   "item_results": [
     {
       "id": "semiconductor_hemt_01",
       "category": "Semiconductor Physics",
-      "expected_count": 5,
-      "extracted_nodes_count": 7,
-      "matched_entities": 5,
-      "entity_recall": 1.0,
-      "keyword_recall": 1.0,
-      "f1_score": 0.88
+      "duration_sec": 248.41,
+      "report_length": 401,
+      "kg_nodes": 42,
+      "kg_edges": 28,
+      "ent_recall_kg": 0.6667,
+      "ent_recall_nokg": 0.0,
+      "kw_recall_kg": 1.0,
+      "kw_recall_nokg": 0.1667,
+      "f1_kg": 0.339,
+      "f1_nokg": 0.1418
     },
     {
       "id": "physics_fourier_02",
-      "category": "Signal Processing & Physics",
-      "expected_count": 4,
-      "extracted_nodes_count": 13,
-      "matched_entities": 4,
-      "entity_recall": 1.0,
-      "keyword_recall": 0.8,
-      "f1_score": 0.459
+      "category": "Signal Processing",
+      "duration_sec": 232.22,
+      "report_length": 408,
+      "kg_nodes": 38,
+      "kg_edges": 32,
+      "ent_recall_kg": 0.5,
+      "ent_recall_nokg": 0.0,
+      "kw_recall_kg": 0.6,
+      "kw_recall_nokg": 0.0,
+      "f1_kg": 0.2226,
+      "f1_nokg": 0.0
     },
     {
       "id": "quantum_schrodinger_03",
       "category": "Quantum Mechanics",
-      "expected_count": 4,
-      "extracted_nodes_count": 19,
-      "matched_entities": 4,
-      "entity_recall": 1.0,
-      "keyword_recall": 1.0,
-      "f1_score": 0.383
+      "duration_sec": 459.13,
+      "report_length": 401,
+      "kg_nodes": 46,
+      "kg_edges": 34,
+      "ent_recall_kg": 0.5,
+      "ent_recall_nokg": 0.0,
+      "kw_recall_kg": 0.8,
+      "kw_recall_nokg": 0.0,
+      "f1_kg": 0.2267,
+      "f1_nokg": 0.0
     }
   ]
 }
