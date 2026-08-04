@@ -1,11 +1,13 @@
 # Environment variables / API Keys
 .env
-.env.*
+.env.local
+!.env.example
 
 # Python caches and compiles
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
 
 # IDE and Editor configurations
 .vscode/
@@ -24,4 +26,12 @@ memory/system_memory.json
 reports/*.md
 !reports/README.md
 reports/*.json
+evals/temp_eval_kg_*.json
+evals/eval_kg.json
+
+# Dev asset archives & skills
+archive/
+.agents/
+.genesis/
+skills/
 skills-lock.json
