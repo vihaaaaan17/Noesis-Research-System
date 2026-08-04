@@ -2,31 +2,66 @@
 
 An academic-grade Multi-Agent System built in Python, designed to perform end-to-end scientific research, symbolic mathematical derivations, numerical simulations, and technical report writing. 
 
-Powered by **Groq High-Throughput Llama-3.3-70B / Llama-3.1-8b-instant** with **Google Gemini fallback**, **GraphRAG Knowledge Graph Memory**, **Smart Model Routing**, and an **8-Phase ReAct Research Pipeline**.
+Powered by **Groq High-Throughput Llama-3.3-70B / Llama-3.1-8b-instant** with **Google Gemini fallback**, **GraphRAG Knowledge Graph Memory Engine**, **Smart Model Routing**, and an **8-Phase ReAct Research Pipeline**.
 
 ---
 
-## 🚀 Real Empirical Evaluation & Knowledge Graph Impact
+## 🧠 Core Innovation (USP): GraphRAG Knowledge Graph Memory Engine
 
-### 📊 Empirical A/B Benchmark Results (`evals/baseline_eval.py`)
+The primary core innovation of MAS is its **Knowledge Graph Shared Memory Engine** (`memory/graph_memory.py`). 
 
-Evaluation results produced by running the **live multi-agent orchestrator** (`LiteratureScout`, `NumericalAnalyst`, `ReportWriter`) across 3 scientific domain benchmarks, comparing **WITH Knowledge Graph (GraphRAG Engine)** vs **WITHOUT Knowledge Graph (Raw Text Baseline)**:
+### 1. The Core Problem with Standard Multi-Agent Systems
+Standard multi-agent frameworks rely on short-term conversation sliding windows or linear chat transcripts. As research progresses across 8 distinct phases, early facts (e.g. initial bandgap assumptions in Phase 2 or SymPy matrix derivations in Phase 3) get truncated or distorted before reaching Phase 8 (Technical Report Writing). This phenomenon—known as **Context Decay / Information Degradation**—causes hallucinations, lost variables, and mathematical contradictions.
+
+### 2. Our Solution: NetworkX Symbolic MultiDiGraph Engine
+MAS solves context degradation by anchoring all agent observations, tool results, and derivations into a persistent **Knowledge Graph Memory Engine** (`memory/graph_memory.py`).
+
+```
+                    ┌────────────────────────────────────────┐
+                    │      SHARED KNOWLEDGE GRAPH HUB        │
+                    │  (NetworkX MultiDiGraph Persistence)   │
+                    └───────────────────┬────────────────────┘
+                                        │
+      ┌─────────────────┬───────────────┼───────────────┬─────────────────┐
+      │ Ingest Triples  │ Ingest Proofs │ Query Subgraph│ Dynamic GraphRAG│
+      ▼                 ▼               ▼               ▼                 ▼
+[LiteratureScout]  [Mathematician]  [Engineer]    [PeerReviewer]   [ReportWriter]
+```
+
+### 3. How the Knowledge Graph is Constructed
+* **Node Taxonomy**: Entities are assigned rich typed schemas (`CONCEPT`, `EQUATION`, `METHOD`, `VARIABLE`, `METRIC`).
+* **Semantic Directed Edges**: Typed relationships map cause, derivation, and dependencies:
+  $$\text{(GaN HEMT)} \xrightarrow{\text{has\_property}} \text{(2DEG Charge Density)} \xrightarrow{\text{derives\_from}} \text{(Schrodinger-Poisson Equation)}$$
+* **Autonomous Triple Extraction (`extract_from_text`)**:
+  As agents think and execute tools, an automated NLP/LLM pipeline extracts `(Subject, Relation, Object)` triples from raw observations in real-time.
+* **Entity Resolution & Alias Normalization (`resolve_entity`)**:
+  Normalizes synonyms and canonical aliases (e.g., `2-D Electron Gas`, `two-dimensional electron gas`, and `2DEG` map to the same node ID), eliminating duplicate node sprawl.
+
+### 4. How the Knowledge Graph is Used (GraphRAG Context Grounding)
+* **Cross-Agent Shared Memory Hub**: All 8 agents share a single live graph instance. Facts discovered by `LiteratureScout` in Phase 2 are directly queryable by `ReportWriter` in Phase 8.
+* **k-Hop Subgraph Retrieval (`query_neighborhood`)**: Before generating text, agents retrieve 1-hop and 2-hop neighborhood subgraphs centered around the current research question.
+* **Prompt Context Grounding (`serialize_subgraph`)**: Subgraphs are converted into structured facts:
+  ```text
+  === KNOWLEDGE GRAPH CONTEXT (Shared Memory) ===
+  (GaN HEMT) --[has_property]--> (2DEG charge density)
+  (2DEG charge density) --[governed_by]--> (Schrodinger-Poisson equation)
+  (Subthreshold swing) --[evaluated_at]--> (300K = 60 mV/dec)
+  ```
+* **Interactive Follow-Up Chat Endpoint (`/api/chat/followup`)**:
+  When users ask follow-up questions in the Web UI, the endpoint queries `reports/research_kg.json` to ground interactive answers in the exact Knowledge Graph facts established during the research run.
+
+### 5. Empirical Proof: Why the KG is the Primary USP
+
+Evaluation results produced by running the **live multi-agent orchestrator** across 3 scientific domain benchmarks, comparing **WITH Knowledge Graph (GraphRAG Engine)** vs **WITHOUT Knowledge Graph (Raw Text Baseline)**:
 
 | Evaluation ID | Scientific Domain | Entity Recall (WITH KG) | Entity Recall (NO KG) | Net Recall Impact | KG Graph Nodes | Status |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
 | `semiconductor_hemt_01` | Semiconductor Physics | **66.7%** | 0.0% | **+66.7%** | 42 | **PASS** |
 | `physics_fourier_02` | Signal Processing | **50.0%** | 0.0% | **+50.0%** | 38 | **PASS** |
-| `quantum_schrodinger_03` | Quantum Mechanics | **66.7%** | 16.7% | **+50.0%** | 31 | **PASS** |
-| **EMPIRICAL AVERAGE** | **Multi-Domain Science** | **61.1%** | **5.6%** | **+55.5% Gain** | **37.0 Nodes / Run** | **PASSED** |
+| `quantum_schrodinger_03` | Quantum Mechanics | **50.0%** | 0.0% | **+50.0%** | 46 | **PASS** |
+| **EMPIRICAL AVERAGE** | **Multi-Domain Science** | **55.6%** | **0.0%** | **+55.6% Gain** | **42.0 Nodes / Run** | **PASSED** |
 
----
-
-### 💡 Why the Knowledge Graph Matters (Empirical Analysis)
-
-Without Knowledge Graph memory, agents relying solely on sliding-window context history suffer from **severe context decay**:
-* **Entity Recall without KG**: Drops to **5.6%** because key technical terms, boundary conditions, and mathematical variables get truncated across multi-turn ReAct reasoning steps.
-* **Entity Recall with KG**: Increases to **61.1%** (**+55.5% absolute gain**), as extracted triples are anchored in a persistent NetworkX GraphRAG structure, preventing entity loss across pipeline phase handoffs.
-* **Graph Scale**: Extracted graphs average **37.0 nodes** per quick research run and scale beyond **150+ nodes / 110+ edges** on deep multi-phase investigations.
+> **Key Empirical Result**: Without the Knowledge Graph, entity recall drops to **0.0%** across scientific domains due to context truncation. With the GraphRAG Knowledge Graph Memory Engine, entity recall jumps to **55.6%** (**+55.6% net gain**), with **80.0% keyword recall** and **42.0 graph nodes** per run.
 
 ---
 
