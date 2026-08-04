@@ -20,6 +20,8 @@ __pycache__/
 long_term_memory.json
 memory/system_memory.json
 
-# Local generated research reports
+# Local generated research reports & runtime dumps
 reports/*.md
 !reports/README.md
+reports/*.json
+skills-lock.json

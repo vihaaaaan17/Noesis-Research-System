@@ -1,0 +1,68 @@
+[
+  {
+    "id": "semiconductor_hemt_01",
+    "category": "Semiconductor Physics",
+    "question": "Derive the 2DEG charge density equation in a GaN HEMT and compute the subthreshold swing at 300K.",
+    "expected_entities": [
+      "GaN HEMT",
+      "2DEG charge density",
+      "subthreshold swing",
+      "300K",
+      "2DEG"
+    ],
+    "expected_equations": [
+      "n_s",
+      "S = (kT/q) * ln(10)"
+    ],
+    "expected_keywords": [
+      "2DEG",
+      "GaN",
+      "HEMT",
+      "subthreshold",
+      "swing",
+      "charge density"
+    ]
+  },
+  {
+    "id": "physics_fourier_02",
+    "category": "Signal Processing & Physics",
+    "question": "Derive the Fourier transform of a Gaussian pulse and compute its bandwidth for sigma = 1 ps.",
+    "expected_entities": [
+      "Gaussian pulse",
+      "Fourier transform",
+      "bandwidth",
+      "sigma"
+    ],
+    "expected_equations": [
+      "exp(-t^2 / (2*sigma^2))"
+    ],
+    "expected_keywords": [
+      "Gaussian",
+      "Fourier",
+      "transform",
+      "bandwidth",
+      "frequency"
+    ]
+  },
+  {
+    "id": "quantum_schrodinger_03",
+    "category": "Quantum Mechanics",
+    "question": "Solve the 1D Schrodinger equation for a finite potential well and find the quantised energy levels.",
+    "expected_entities": [
+      "Schrodinger equation",
+      "finite potential well",
+      "quantised energy levels",
+      "wavefunction"
+    ],
+    "expected_equations": [
+      "-hbar^2/(2m) d^2psi/dx^2 + V(x)psi = E psi"
+    ],
+    "expected_keywords": [
+      "Schrodinger",
+      "potential well",
+      "quantised",
+      "energy",
+      "wavefunction"
+    ]
+  }
+]

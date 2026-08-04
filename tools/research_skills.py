@@ -61,13 +61,21 @@ class ResearchSkillsTool(BaseTool):
 
     def run(self, input_text: str) -> str:
         # Parse inputs
-        if "|" not in input_text:
-            return (
-                "Invalid format. Use: '<skill_name> | <text_to_analyze>'\n"
-                f"Available skills: {list(self.SKILLS.keys())}"
-            )
-            
-        skill_name, content = input_text.split("|", 1)
+        input_text = input_text.strip()
+        if "|" in input_text:
+            skill_name, content = input_text.split("|", 1)
+        else:
+            # Fallback: check if first word is a known skill name
+            parts = input_text.split(None, 1)
+            if parts and parts[0].strip().lower() in self.SKILLS:
+                skill_name = parts[0]
+                content = parts[1] if len(parts) > 1 else ""
+            else:
+                return (
+                    "Invalid format. Use: '<skill_name> | <text_to_analyze>'\n"
+                    f"Available skills: {list(self.SKILLS.keys())}"
+                )
+                
         skill_name = skill_name.strip().lower()
         content = content.strip()
 
@@ -79,37 +87,11 @@ class ResearchSkillsTool(BaseTool):
 
         system_instruction = self.SKILLS[skill_name]
         
-        # Invoke LLM with retries
-        max_retries = 5
-        base_delay = 2.0
-
-        if not config.GEMINI_API_KEY:
-            return "[ResearchSkillsTool error: GEMINI_API_KEY is not set. Please add it to your .env file.]"
-
-        genai.configure(api_key=config.GEMINI_API_KEY)
-        
-        for attempt in range(max_retries):
-            try:
-                model = genai.GenerativeModel(
-                    model_name=config.DEFAULT_MODEL,
-                    system_instruction=system_instruction
-                )
-                response = model.generate_content(
-                    content,
-                    generation_config={
-                        "temperature": 0.3,
-                        "max_output_tokens": config.DEFAULT_MAX_TOKENS,
-                    }
-                )
-                # Clean Unicode box lines/em-dashes for console safety
-                return response.text.replace("\u2014", "-").replace("\u2500", "-")
-            except Exception as e:
-                err_str = str(e).lower()
-                is_rate_limit = "429" in err_str or "rate limit" in err_str or "exhausted" in err_str
-                
-                if is_rate_limit and attempt < max_retries - 1:
-                    sleep_time = base_delay * (2 ** attempt)
-                    time.sleep(sleep_time)
-                else:
-                    return f"[ResearchSkillsTool error: {e}]"
-        return "[ResearchSkillsTool error: Max retries exceeded due to rate limits.]"
+        # Invoke LLM via config.call_llm_api
+        res_text = config.call_llm_api(
+            prompt=content,
+            system_instruction=system_instruction,
+            temperature=0.3
+        )
+        # Clean Unicode box lines/em-dashes for console safety
+        return res_text.replace("\u2014", "-").replace("\u2500", "-")

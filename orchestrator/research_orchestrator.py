@@ -67,13 +67,26 @@ class ResearchOrchestrator:
 
     def __init__(
         self,
-        depth:      str  = "standard",
-        output_dir: str  = "reports",
-        verbose:    bool = True,
+        depth:        str  = "standard",
+        output_dir:   str  = "reports",
+        verbose:      bool = True,
+        graph_memory       = None,
     ):
         self.depth      = depth
         self.output_dir = output_dir
         self.verbose    = verbose
+
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        # Knowledge Graph Shared Memory
+        if graph_memory is not None:
+            self.graph_memory = graph_memory
+        else:
+            from memory.graph_memory import KnowledgeGraphMemory
+            self.graph_memory = KnowledgeGraphMemory(
+                storage_path=os.path.join(self.output_dir, "research_kg.json"),
+                verbose=self.verbose
+            )
 
         # Research document - accumulates findings across phases
         self.doc: dict = {
@@ -88,6 +101,10 @@ class ResearchOrchestrator:
             "report":      "",
         }
 
+        # Smart Model Router (Flash vs Pro allocation)
+        from core.model_router import SmartModelRouter
+        self.router = SmartModelRouter(depth=self.depth, verbose=self.verbose)
+
         # Agent registry - populated by register_agents()
         self._agents: dict = {}
 
@@ -98,36 +115,43 @@ class ResearchOrchestrator:
         if config.GEMINI_API_KEY:
             genai.configure(api_key=config.GEMINI_API_KEY)
 
-        os.makedirs(self.output_dir, exist_ok=True)
-
     # -------------------------------------------------------------
     # Agent setup
     # -------------------------------------------------------------
 
     def register_agents(
         self,
-        scout     = None,
+        scout         = None,
         mathematician = None,
-        engineer  = None,
-        numerical = None,
-        reviewer  = None,
-        synthesizer = None,
-        writer    = None,
+        engineer      = None,
+        numerical     = None,
+        reviewer      = None,
+        synthesizer   = None,
+        writer        = None,
     ) -> "ResearchOrchestrator":
         """
         Register specialist agents for each phase.
-        Any unregistered phase will use a fallback general agent.
+        Attaches the shared Knowledge Graph memory and dynamically routes models.
         """
-        if scout:        self._agents["literature"]   = scout
-        if mathematician: self._agents["mathematics"] = mathematician
-        if engineer:     self._agents["engineering"]  = engineer
-        if numerical:    self._agents["computation"]  = numerical
-        if reviewer:     self._agents["review"]       = reviewer
-        if synthesizer:  self._agents["synthesis"]    = synthesizer
-        if writer:       self._agents["report"]       = writer
+        provided = {
+            "literature":  scout,
+            "mathematics": mathematician,
+            "engineering": engineer,
+            "computation": numerical,
+            "review":      reviewer,
+            "synthesis":   synthesizer,
+            "report":      writer,
+        }
+
+        for phase_key, agent in provided.items():
+            if agent is not None:
+                agent.graph_memory = self.graph_memory
+                # Dynamically set model based on SmartModelRouter phase allocation
+                agent.model = self.router.get_model_for_phase(phase_key)
+                self._agents[phase_key] = agent
 
         if self.verbose:
-            print(f"{Fore.CYAN}[ResearchOrchestrator] Registered agents: "
+            print(f"{Fore.CYAN}[ResearchOrchestrator] Registered agents with Smart Model Router & Shared KG memory: "
                   f"{list(self._agents.keys())}{Style.RESET_ALL}")
         return self
 
@@ -162,6 +186,10 @@ class ResearchOrchestrator:
             
             # Naturally space out phases to avoid triggering burst API rate limits
             time.sleep(2.0)
+
+        # Save Knowledge Graph shared memory to disk
+        if self.graph_memory:
+            self.graph_memory.save_to_json()
 
         # Save report to disk
         report  = self.doc["report"] or self.doc["synthesis"]
@@ -403,44 +431,12 @@ class ResearchOrchestrator:
 
     def _llm_call(self, prompt: str) -> str:
         """Direct LLM call for orchestrator-level thinking."""
-        import google.generativeai as genai
-        import time
-        max_retries = 5
-        base_delay = 2.0
-
-        if not config.GEMINI_API_KEY:
-            return "[Orchestrator LLM error: GEMINI_API_KEY is not set. Please add it to your .env file or config.py.]"
-            
-        genai.configure(api_key=config.GEMINI_API_KEY)
-        
-        for attempt in range(max_retries):
-            try:
-                model = genai.GenerativeModel(
-                    model_name=config.DEFAULT_MODEL,
-                    system_instruction="You are a research planning expert."
-                )
-                response = model.generate_content(
-                    prompt,
-                    generation_config={
-                        "temperature": 0.4,
-                        "max_output_tokens": config.DEFAULT_MAX_TOKENS,
-                    }
-                )
-                return response.text
-            except Exception as e:
-                is_rate_limit = False
-                err_str = str(e).lower()
-                if "429" in err_str or "rate limit" in err_str or "exhausted" in err_str:
-                    is_rate_limit = True
-                    
-                if is_rate_limit and attempt < max_retries - 1:
-                    sleep_time = base_delay * (2 ** attempt)
-                    if self.verbose:
-                        print(f"{Fore.YELLOW}[ResearchOrchestrator] Rate limit reached in direct call. Retrying in {sleep_time:.2f}s... (Attempt {attempt+1}/{max_retries}){Style.RESET_ALL}")
-                    time.sleep(sleep_time)
-                else:
-                    return f"[Orchestrator LLM error: {e}]"
-        return "[Orchestrator LLM error: Max retries exceeded due to rate limiting.]"
+        return config.call_llm_api(
+            prompt=prompt,
+            system_instruction="You are a research planning expert.",
+            model=config.DEFAULT_MODEL,
+            temperature=0.4
+        )
 
     def _save_report(self, question: str, report: str) -> str:
         """Save the final report to a markdown file."""

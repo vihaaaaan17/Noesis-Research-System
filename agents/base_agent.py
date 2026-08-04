@@ -49,6 +49,7 @@ class Agent:
         memory_strategy: str   = "window",
         memory_limit:    int   = 2000,
         long_term               = None,
+        graph_memory            = None,
     ):
         self.name        = name
         self.role        = role
@@ -66,6 +67,9 @@ class Agent:
         # Long-term memory
         self.long_term = long_term
 
+        # Knowledge Graph memory
+        self.graph_memory = graph_memory
+
         # Configure Gemini
         if config.GEMINI_API_KEY:
             genai.configure(api_key=config.GEMINI_API_KEY)
@@ -73,7 +77,8 @@ class Agent:
         if self.verbose:
             print(f"{Fore.CYAN}[{self.name}] Initialized "
                   f"| model={self.model} "
-                  f"| memory={memory_strategy}{Style.RESET_ALL}")
+                  f"| memory={memory_strategy} "
+                  f"| graph_memory={'active' if self.graph_memory else 'none'}{Style.RESET_ALL}")
 
     # -------------------------------------------------------------
     # Short-term memory setup
@@ -107,7 +112,7 @@ class Agent:
     def chat(self, user_message: str) -> str:
         """
         Send a message and get a response.
-        Now routes through ShortTermMemory if active.
+        Now routes through ShortTermMemory and KnowledgeGraphMemory if active.
         """
         if self.verbose:
             print(f"\n{Fore.YELLOW}[{self.name}] <- USER:{Style.RESET_ALL} "
@@ -120,7 +125,7 @@ class Agent:
             self.history.append({"role": "user", "content": user_message})
 
         # Build messages for LLM
-        messages      = self._build_messages()
+        messages      = self._build_messages(user_query=user_message)
         response_text = self._call_llm(messages)
 
         # Store assistant response
@@ -128,6 +133,10 @@ class Agent:
             self._short_term.add("assistant", response_text)
         else:
             self.history.append({"role": "assistant", "content": response_text})
+
+        # Auto-extract entities and relations to KnowledgeGraphMemory
+        if self.graph_memory:
+            self.graph_memory.extract_from_text(response_text, source_doc=self.name)
 
         if self.verbose:
             print(f"{Fore.GREEN}[{self.name}] -> RESPONSE:{Style.RESET_ALL} "
@@ -139,10 +148,10 @@ class Agent:
     # Internal helpers
     # -------------------------------------------------------------
 
-    def _build_messages(self) -> list[dict]:
+    def _build_messages(self, user_query: str = "") -> list[dict]:
         """
         Build the full message list sent to the LLM:
-          [system prompt + tool list + long-term context] + [history]
+          [system prompt + tool list + long-term context + kg context] + [history]
         """
         system_content = self.role + self._build_tool_prompt()
 
@@ -151,6 +160,15 @@ class Agent:
             lt_context = self.long_term.build_context_string()
             if lt_context:
                 system_content += f"\n\n{lt_context}"
+
+        # Prepend any relevant Knowledge Graph shared memory context
+        if self.graph_memory:
+            query_text = user_query
+            if not query_text and self.history:
+                query_text = str(self.history[-1].get("content", ""))
+            kg_context = self.graph_memory.get_context_for_prompt(query_text)
+            if kg_context:
+                system_content += f"\n\n{kg_context}"
 
         system_message = {"role": "system", "content": system_content}
 
@@ -163,63 +181,13 @@ class Agent:
         return [system_message] + history
 
     def _call_llm(self, messages: list[dict]) -> str:
-        """Make the API call to Gemini, retrying on rate limit."""
-        import time
-        max_retries = 5
-        base_delay = 2.0
-        
-        if not config.GEMINI_API_KEY:
-            error_msg = f"[ERROR in {self.name}]: GEMINI_API_KEY is not set. Please add it to your .env file or config.py."
-            print(f"{Fore.RED}{error_msg}{Style.RESET_ALL}")
-            return error_msg
-            
-        # Configure on call just in case config changed
-        genai.configure(api_key=config.GEMINI_API_KEY)
-
-        # Extract system instruction and convert remaining messages
-        system_content = None
-        contents = []
-        for msg in messages:
-            if msg["role"] == "system":
-                system_content = msg["content"]
-            else:
-                role = "model" if msg["role"] == "assistant" else "user"
-                contents.append({
-                    "role": role,
-                    "parts": [msg["content"]]
-                })
-        
-        for attempt in range(max_retries):
-            try:
-                # Instantiate Gemini GenerativeModel
-                model = genai.GenerativeModel(
-                    model_name=self.model,
-                    system_instruction=system_content
-                )
-                
-                generation_config = {
-                    "temperature": self.temperature,
-                    "max_output_tokens": self.max_tokens,
-                }
-                
-                response = model.generate_content(contents, generation_config=generation_config)
-                return response.text
-            except Exception as e:
-                is_rate_limit = False
-                err_str = str(e).lower()
-                if "429" in err_str or "rate limit" in err_str or "exhausted" in err_str:
-                    is_rate_limit = True
-                    
-                if is_rate_limit and attempt < max_retries - 1:
-                    sleep_time = base_delay * (2 ** attempt)
-                    if self.verbose:
-                        print(f"{Fore.YELLOW}[{self.name}] Rate limit reached. Retrying in {sleep_time:.2f}s... (Attempt {attempt+1}/{max_retries}){Style.RESET_ALL}")
-                    time.sleep(sleep_time)
-                else:
-                    error_msg = f"[ERROR in {self.name}]: {str(e)}"
-                    print(f"{Fore.RED}{error_msg}{Style.RESET_ALL}")
-                    return error_msg
-        return f"[ERROR in {self.name}]: Max retries exceeded due to rate limiting."
+        """Make the API call to LLM via Groq / Gemini dispatcher."""
+        return config.call_llm_api(
+            messages=messages,
+            model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens
+        )
 
     def _summarize_text(self, text: str) -> str:
         """

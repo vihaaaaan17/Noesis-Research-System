@@ -97,7 +97,7 @@ class ReActLoop:
     verbose     : print loop steps to console
     """
 
-    def __init__(self, agent, max_steps: int = 6, verbose: bool = True):
+    def __init__(self, agent, max_steps: int = 3, verbose: bool = True):
         self.agent     = agent
         self.max_steps = max_steps
         self.verbose   = verbose
@@ -158,11 +158,20 @@ class ReActLoop:
                 if self.verbose:
                     self._print_observation(tool_result)
 
+                # -- Step D2: Knowledge Graph Extraction ----------
+                kg_subgraph_str = ""
+                if getattr(self.agent, "graph_memory", None):
+                    self.agent.graph_memory.extract_from_text(
+                        str(tool_result),
+                        source_doc=f"tool:{tool_name}"
+                    )
+                    kg_subgraph_str = self.agent.graph_memory.get_context_for_prompt(tool_input)
+
                 # -- Step E: Feed result back to LLM --------------
-                # The next message to the LLM includes the tool result
-                # so it can use this info to decide the next step
+                # The next message to the LLM includes the tool result and KG update
                 current_input = (
                     f"Tool '{tool_name}' returned:\n{tool_result}\n\n"
+                    f"{kg_subgraph_str}\n\n"
                     f"Now continue - either call another tool or give FINAL_ANSWER."
                 )
 
@@ -240,26 +249,31 @@ class ReActLoop:
     # -------------------------------------------------------------
 
     def _print_header(self, message: str):
-        print(f"\n{'='*60}")
-        print(f"{Fore.CYAN}ReAct Loop Started | Agent: {self.agent.name}{Style.RESET_ALL}")
-        print(f"{Fore.WHITE}User: {message}{Style.RESET_ALL}")
-        print(f"{'='*60}")
+        import config
+        config.safe_print(f"\n{'='*60}")
+        config.safe_print(f"{Fore.CYAN}ReAct Loop Started | Agent: {self.agent.name}{Style.RESET_ALL}")
+        config.safe_print(f"{Fore.WHITE}User: {message}{Style.RESET_ALL}")
+        config.safe_print(f"{'='*60}")
 
     def _print_step(self, step: int, label: str, content: str):
-        print(f"\n{Fore.YELLOW}[Step {step}] {label}{Style.RESET_ALL}")
+        import config
+        config.safe_print(f"\n{Fore.YELLOW}[Step {step}] {label}{Style.RESET_ALL}")
         short = content[:120] + "..." if len(content) > 120 else content
-        print(f"  Input: {short}")
+        config.safe_print(f"  Input: {short}")
 
     def _print_tool_call(self, tool_name: str, tool_input: str):
-        print(f"{Fore.MAGENTA}  -> ACT: calling '{tool_name}' "
-              f"with '{tool_input}'{Style.RESET_ALL}")
+        import config
+        config.safe_print(f"{Fore.MAGENTA}  -> ACT: calling '{tool_name}' "
+                          f"with '{tool_input}'{Style.RESET_ALL}")
 
     def _print_observation(self, result: str):
+        import config
         short = result[:200] + "..." if len(result) > 200 else result
-        print(f"{Fore.BLUE}  <- OBSERVE: {short}{Style.RESET_ALL}")
+        config.safe_print(f"{Fore.BLUE}  <- OBSERVE: {short}{Style.RESET_ALL}")
 
     def _print_final(self, answer: str):
-        print(f"\n{Fore.GREEN}{'='*60}")
-        print(f"FINAL ANSWER:")
-        print(f"{answer}")
-        print(f"{'='*60}{Style.RESET_ALL}")
+        import config
+        config.safe_print(f"\n{Fore.GREEN}{'='*60}")
+        config.safe_print(f"FINAL ANSWER:")
+        config.safe_print(f"{answer}")
+        config.safe_print(f"{'='*60}{Style.RESET_ALL}")

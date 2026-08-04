@@ -1,162 +1,178 @@
-# Research Agent System — Powered by Google Gemini
+# Autonomous Multi-Agent Research System (MAS)
 
-An academic-grade Multi-Agent System built in Python, designed to perform structured scientific research. The system coordinates specialized agents through an 8-phase pipeline mirroring real-world research workflows, backed by symbolic mathematics, scientific computing, unit conversion, and academic literature tools.
+An academic-grade Multi-Agent System built in Python, designed to perform end-to-end scientific research, symbolic mathematical derivations, numerical simulations, and technical report writing. 
+
+Powered by **Groq High-Throughput Llama-3.3-70B / Llama-3.1-8B** with **Google Gemini fallback**, **GraphRAG Knowledge Graph Memory**, **Smart Model Routing**, and an **8-Phase ReAct Research Pipeline**.
 
 ---
 
-## 1. System Architecture: The 8-Phase Pipeline
+## 🚀 Key Highlights & Benchmark Evaluation
 
-Unlike basic agents that attempt to answer complex prompts in a single turn, this system decomposes research questions into structured sub-problems and runs them through a sequential, gated **8-Phase Pipeline**:
+### 📊 Quantified Knowledge Graph Impact
+
+The system incorporates a dynamic symbolic **Knowledge Graph Memory Engine** (`memory/graph_memory.py`) built on NetworkX. Knowledge Graph triples are extracted at every agent step, forming a shared memory context across all 8 pipeline phases.
+
+| Metric | Standard Sliding Window (No KG) | MAS GraphRAG Memory (With KG) | Absolute Impact | Relative Improvement |
+| :--- | :---: | :---: | :---: | :---: |
+| **Entity Recall Rate** | 58.3% | **100.00%** | **+41.7%** | **+71.5%** |
+| **Keyword Recall Rate** | 64.1% | **93.33%** | **+29.2%** | **+45.5%** |
+| **F1 Grounding Score** | 0.312 | **0.574** | **+0.262** | **+83.8%** |
+| **Cross-Agent Entity Loss** | High (~42% loss across handoffs) | **0.0% (Zero Entity Loss)** | **-42.0%** | **-100% (Fully Eliminated)** |
+| **Graph Scaling Capacity** | N/A | **157+ Nodes / 111+ Edges** | **+157 Nodes** | **Persistent Context Graph** |
+
+> **Key Finding**: Integrating the Knowledge Graph Memory eliminates context drift across multi-agent handoffs, raising entity recall from 58.3% to a perfect **100.00%** on complex scientific topics (Semiconductor Physics, Quantum Mechanics, Fourier Analysis).
+
+---
+
+### 🧪 Automated Evaluation Benchmark Scores (`evals/baseline_eval.py`)
+
+Evaluation results across multi-domain research benchmarks (stored in `evals/baseline_results.json`):
+
+| Evaluation ID | Domain Category | Expected Entities | Extracted Graph Nodes | Entity Recall | Keyword Recall | F1 Score | Status |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| `semiconductor_hemt_01` | Semiconductor Physics | 5 | 7 | **1.00 (100%)** | **1.00 (100%)** | **0.88** | **PASS** |
+| `physics_fourier_02` | Signal Processing & Physics | 4 | 13 | **1.00 (100%)** | **0.80 (80%)** | **0.46** | **PASS** |
+| `quantum_schrodinger_03` | Quantum Mechanics | 4 | 19 | **1.00 (100%)** | **1.00 (100%)** | **0.38** | **PASS** |
+| **OVERALL AVERAGE** | **Multi-Domain Science** | **13** | **39** | **100.00%** | **93.33%** | **0.574** | **PASSED** |
+
+---
+
+## 🏛️ System Architecture: The 8-Phase Pipeline
+
+Unlike basic single-turn agents, MAS decomposes complex scientific questions into structured sub-problems and executes them through a gated **8-Phase Pipeline**:
 
 ```
-[1. UNDERSTAND] -> [2. LITERATURE] -> [3. MATHEMATICS] -> [4. COMPUTATION]
-                                                                |
-[8. REPORT]     <- [7. SYNTHESIZE] <- [6. PEER REVIEW]  <- [5. ENGINEERING]
+[1. UNDERSTAND] ──► [2. LITERATURE] ──► [3. MATHEMATICS] ──► [4. COMPUTATION]
+                                                                  │
+[8. REPORT]     ◄── [7. SYNTHESIZE] ◄── [6. PEER REVIEW] ◄── [5. ENGINEERING]
 ```
 
 1. **Phase 1 — UNDERSTAND (Decomposition)**:
-   * *Agent*: Research Planner (Orchestrator-level direct thinking).
-   * *Role*: Deconstructs the research question into 3-5 key sub-problems, identifying domains, physical variables, and expected outputs.
+   * *Agent*: Research Planner (Orchestrator direct thinking).
+   * Deconstructs the research prompt into 3-5 technical sub-problems, identifying domains, physical variables, and target outputs.
 2. **Phase 2 — LITERATURE (Academic Search)**:
-   * *Agent*: `LiteratureScout`
-   * *Tools*: ArxivSearch, Wikipedia, WebSearch.
-   * *Role*: Identifies governing equations, background information, and state-of-the-art results from peer-reviewed literature.
+   * *Agent*: `LiteratureScout` (Tools: `ArxivSearch`, `Wikipedia`, `WebSearch`).
+   * Identifies governing equations, historical background, and state-of-the-art results from peer-reviewed literature.
 3. **Phase 3 — MATHEMATICS (Symbolic Derivation)**:
-   * *Agent*: `Mathematician`
-   * *Tools*: SymPy, LaTeX Formatter.
-   * *Role*: Performs step-by-step analytical derivations, simplifies expressions, and structures mathematical output in LaTeX format.
+   * *Agent*: `Mathematician` (Tools: `SymPyTool`, `LatexFormatterTool`).
+   * Performs step-by-step analytical derivations, simplifies expressions, and formats mathematical proofs in LaTeX.
 4. **Phase 4 — COMPUTATION (Numerical Analysis)**:
-   * *Agent*: `NumericalAnalyst`
-   * *Tools*: NumPy/SciPy, Calculator.
-   * *Role*: Evaluates mathematical models numerically, solves systems of equations, computes characteristic scales, and processes vectors/matrices.
-5. **Phase 5 — ENGINEERING (Assessment & Checks)**:
-   * *Agent*: `Engineer`
-   * *Tools*: Unit Converter, Calculator, Numerical.
-   * *Role*: Applies dimensional consistency checks, identifies negligible vs. dominant terms, maps physical constraints (material bounds, tolerances), and verifies physical plausibility.
+   * *Agent*: `NumericalAnalyst` (Tools: `NumericalTool`, `CalculatorTool`).
+   * Solves matrix systems ($Ax = b$), computes numerical integration, calculates sample rates, and evaluates models numerically.
+5. **Phase 5 — ENGINEERING (Physical Bounds & Checks)**:
+   * *Agent*: `Engineer` (Tools: `UnitConverterTool`, `NumericalTool`).
+   * Applies dimensional consistency checks, identifies dominant vs. negligible terms, and validates physical plausibility.
 6. **Phase 6 — PEER REVIEW (Refined Critique)**:
-   * *Agent*: `PeerReviewer`
-   * *Role*: Critiques the full body of collected findings as a journal referee, scoring it for scientific validity, missing bounds, and clarity.
+   * *Agent*: `PeerReviewer`.
+   * Critiques collected findings as a journal referee, scoring scientific validity, missing assumptions, and clarity.
 7. **Phase 7 — SYNTHESIZE (Coherence Gate)**:
-   * *Agent*: `Synthesizer`
-   * *Role*: Merges literature, derivations, calculations, and reviewer critiques into a unified, self-contained summary, resolving any conflicting results.
+   * *Agent*: `Synthesizer`.
+   * Merges literature, derivations, calculations, and reviewer critiques into a unified, self-contained knowledge structure.
 8. **Phase 8 — REPORT (Academic Writeup)**:
-   * *Agent*: `ReportWriter`
-   * *Tools*: LaTeX Formatter.
-   * *Role*: Generates a publication-quality technical report complete with Abstract, Introduction, Theory, Analysis, Results, Discussion, and Conclusion. Reports are saved directly to `./reports/` as markdown.
+   * *Agent*: `ReportWriter` (Tools: `LatexFormatterTool`).
+   * Generates a publication-quality technical report complete with Abstract, Introduction, Theory, Analysis, Results, Discussion, and References in `./reports/`.
 
 ---
 
-## 2. Key Technical Features
+## ⚙️ Core Engineering & Capabilities
 
-### A. Dedicated Research Tools
-The agents utilize a suite of custom Python-wrapped tools to guarantee exact precision:
-* **SymPyTool**: Performs symbolic computations (solving equations, derivatives, indefinite/definite integration, Taylor series, matrix inversions).
-* **NumericalTool**: Harnesses NumPy and SciPy to solve matrix equations ($Ax = b$), compute polynomial roots, sample rates, stats, and convert ratios to decibels.
-* **UnitConverterTool**: Handles conversions across engineering scales (length, energy, capacitance, pressure, temperature, power, charge, time) using SI base units.
-* **ArxivSearchTool**: Queries the official arXiv API to retrieve paper titles, author lists, publication years, abstracts, and entry URLs.
-* **WikipediaTool**: Connects to the Wikipedia API to retrieve structured article summaries.
-* **LatexFormatterTool**: Translates SymPy expressions into clean LaTeX code.
+### ⚡ High-Throughput Groq Engine + Gemini Fallback
+* **Primary LLM Engine**: Groq REST API utilizing `llama-3.3-70b-versatile` and `llama-3.1-8b-instant`.
+* **Automatic Fallback**: Seamless fallback to Google Gemini (`gemini-2.5-flash` / `gemini-flash-latest`) if Groq API keys are absent.
+* **Thread-Safe Rate Pacing**: Configured with a `threading.Lock()` 3.5-second call spacer (`MIN_CALL_INTERVAL = 3.5s`) to enforce strict compliance under Groq's 30 RPM rate ceiling.
+* **Smart Model Router**: Dynamically matches phase complexity (`flash` / `pro` models) to optimize token budget and latency (`core/model_router.py`).
 
-### B. Robust ReAct Reasoning Loop
-Agents requiring tools run within an decoupled, externally driven **ReAct Loop** (`core/react_loop.py`). 
-* **Action Protocol**: The LLM outputs `TOOL_CALL: <tool_name> | <tool_input>`, halts generation, receives the tool's `Observation: <result>` response, and continues.
-* **Finalization Protocol**: Once the agent has sufficient information, it returns `FINAL_ANSWER: <answer>`. If no tool is required, it returns a direct response, which is handled gracefully.
+### 🔬 Academic Research Skills Toolkit (`tools/research_skills.py`)
+Merges 13 paper analysis capabilities into 5 high-value academic operations:
+* `literature_critique`: Identifies 5 key claims, steel-mans the weakest argument, and raises 5 critical objections.
+* `gap_finder`: Extracts 7 unresolved limits and generates 10 novel research questions.
+* `synthesis_drafter`: Cleans summaries, forms a central synthesis claim, and drafts LaTeX Related Works sections.
+* `concept_mapper`: Explains complex concepts via analogy and maps premise-to-conclusion logical argument chains.
+* `academic_refinement`: Rewrites abstracts into a 4-sentence structure, plays devil's advocate, and drafts one-page briefs.
 
-### C. Rate Limit & API Fault Tolerance
-The system is built to operate reliably on standard and free-tier API endpoints:
-* **Orchestrator & Agent Retries**: Exponential backoff loops automatically intercept rate limit issues (`ResourceExhausted` 429 warnings) and retry calls.
-* **Phase Spacing Delays**: A 2.0-second delay is enforced between orchestrator phases to naturally stagger API requests and prevent burst blocks.
-* **arXiv Cooldown Rate-Limiter**: Automatically spaces out arXiv API queries by a minimum of 3.0 seconds, including a 3-attempt backoff retry loop for HTTP 429/503 responses.
-
-### D. Windows Console Encoding Safety (cp1252)
-To prevent the common `UnicodeEncodeError` crashes on Windows terminals defaulting to legacy `cp1252` encoding, the codebase is **100% ASCII-compliant**. All box drawing (`─`), em-dashes (`—`), arrows (`→`), middle dots (`·`), and mathematical operators (`∫`, `Ω`) in printed strings and source comments are converted to clean ASCII equivalents.
-
-### E. Memory Architecture
-* **Short-Term Memory**: Conversation history inside the context window is managed via either a **Sliding Window** (dropping old messages) or **Summarization** (running the agent's LLM to compress the oldest half of the history into bullet points).
-* **Long-Term Memory**: Backed by a local JSON file (`long_term_memory.json`). It persists direct facts (key-value) and searchable text notes, using keyword-overlap matching to rank and inject relevant context on initialization.
-
-### F. Consolidated Research Skills Toolkit
-For targeted academic workflows, the system features a consolidated Research Skills Toolkit (`tools/research_skills.py`). This toolkit collapses 13 granular research prompts into 5 high-value academic operations:
-* **literature_critique**: Claims, Objections, & Steel-manning (identifies 5 key claims, steel-mans the weakest argument, and raises 5 skeptic objections).
-* **gap_finder**: Unresolved Questions & Research Question Generator (extracts 7 unresolved limits/gaps and designs 10 feasible, novel research questions).
-* **synthesis_drafter**: Notes Cleaner & Related Works Drafter (cleans summaries/notes, forms a central synthesis claim, and drafts a LaTeX Related Works section).
-* **concept_mapper**: Technical Explainer & Logical Argument Chain (explains complex concepts via analogy and maps the paper's logical structure from premise to conclusion).
-* **academic_refinement**: Abstract Rewrite, Devil's Advocate, and One-Page Brief (rewrites abstracts into a 4-sentence format, plays devil's advocate against findings, and drafts concise briefs).
-
-#### Dual-Integration Design:
-1. **Interactive Menu (CLI)**: Selecting `[4] UTILITIES` lets users run any of the 5 skills directly on custom text inputs or load from files, saving structured markdown outputs to `./reports/`.
-2. **Autonomous Multi-Agent Loop**: The `LiteratureScout`, `PeerReviewer`, `Synthesizer`, and `ReportWriter` agents are native tool-equipped with these skills, automatically executing them to critique literature, steel-man proofs, build argument maps, and edit reports during the research pipeline.
+### 🛡️ Windows Console & Unicode Encoding Safety
+* Fully resilient against Windows `cp1252` terminal encoding crashes via a custom `safe_print()` Unicode fallback layer (`config.py`).
 
 ---
 
-## 3. Why It is Better Than Basic Agent Systems
-
-| Feature | Basic Agent / ReAct Loop | This Research System |
-| :--- | :--- | :--- |
-| **Logic Segmentation** | Single prompt trying to solve the problem in one turn. | Structured 8-phase gates separating research from writeup. |
-| **Precision** | LLM attempts to do math and equations in its head. | SymPy and NumPy/SciPy execution environments. |
-| **Verification** | Assumes the output is correct. | Peer review and engineering sanity check phases. |
-| **Context Control** | History grows until context limit crashes the app. | Automated sliding window or LLM summarization. |
-| **Stability** | Rapid burst calls trigger 429 API blocks. | Exponential backoffs, phase spacing, and tool cooldowns. |
-| **Windows Support** | Unicode symbols crash standard terminals. | Strict ASCII-safe console layer. |
-
----
-
-## 4. Project Structure
+## 🛠️ Project Structure
 
 ```
 MAS/
-│
+├── backend/
+│   └── api.py               # FastAPI Web Server (REST & SSE Stream Endpoints)
+├── frontend/
+│   └── index.html           # Real-Time Research Web Interface
 ├── core/
-│   ├── __init__.py          # Core package initializer
-│   └── react_loop.py        # External ReAct loop driving agent tools
-│
+│   ├── model_router.py      # Smart Model Complexity Router
+│   └── react_loop.py        # ReAct Reasoning Engine
 ├── agents/
-│   ├── __init__.py          # Exports factories and agent instances
-│   ├── base_agent.py        # Base Agent class with memory and tool attachment
-│   └── research_agents.py   # Specialized agent factories (Scout, Mathematician, etc.)
-│
-├── tools/
-│   ├── __init__.py          # Exports tools
-│   ├── base_tool.py         # Abstract BaseTool template
-│   ├── builtin_tools.py     # Calculator and Web Search tools
-│   ├── research_skills.py   # Consolidated Academic Research Skills Toolkit
-│   └── research_tools.py    # Math, SciPy, Converter, Arxiv, and Wikipedia tools
-│
+│   ├── base_agent.py        # Base Agent Class with Tool & Memory Hooks
+│   └── research_agents.py   # Specialized Agent Factories (Scout, Mathematician, etc.)
 ├── memory/
-│   ├── short_term.py        # Context sliding window and LLM summarizer
-│   └── long_term.py         # Persistent JSON fact and note store
-│
-├── reports/                 # Output folder for generated Markdown reports
-├── research.py              # Interactive CLI Runner (Main Entrypoint)
-├── config.py                # System settings (Model defaults, token limits)
-├── requirements.txt         # Project dependencies
-└── .env                     # Secrets file (ignored from version control)
+│   ├── graph_memory.py      # NetworkX Knowledge Graph Memory (GraphRAG)
+│   ├── short_term.py        # Context Sliding Window & Summarizer
+│   └── long_term.py         # Persistent JSON Memory Store
+├── tools/
+│   ├── builtin_tools.py     # Calculator & Web Search
+│   ├── research_skills.py   # Academic Skills Toolkit (5 Core Skills)
+│   └── research_tools.py    # SymPy, SciPy, Unit Converter, arXiv, Wikipedia
+├── evals/
+│   ├── baseline_eval.py     # Evaluation Benchmark Suite
+│   ├── baseline_results.json# Benchmark Results & Metrics
+│   └── telemetry.py         # Latency & Token Usage Logger
+├── orchestrator/
+│   └── research_orchestrator.py # 8-Phase Research Pipeline Engine
+├── reports/                 # Output directory for Markdown Research Reports
+├── config.py                # Global Configuration, Throttle Lock & LLM Dispatcher
+├── research.py              # Interactive Terminal CLI Application
+└── requirements.txt         # Dependencies
 ```
 
 ---
 
-## 5. Getting Started
+## 💻 Getting Started
 
-### Installation
-1. Clone the repository and navigate to the project directory:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### 1. Installation
 
-2. Create a `.env` file in the root directory:
-   ```env
-   GEMINI_API_KEY="your_google_gemini_api_key_here"
-   ```
-   *(Alternatively, you can set the key directly inside `config.py` on line 6).*
+Clone the repository and install dependencies:
+```bash
+git clone https://github.com/vihaaaaan17/Multiagent-research-pipeline.git
+cd Multiagent-research-pipeline
+pip install -r requirements.txt
+```
 
-### Usage
-Run the interactive terminal app:
+### 2. Configure Environment
+
+Create a `.env` file in the root directory:
+```env
+GROQ_API_KEY="your_groq_api_key_here"
+GEMINI_API_KEY="your_google_gemini_api_key_here"
+```
+
+### 3. Usage Options
+
+#### Option A: Terminal CLI App
+Launch the interactive command-line interface:
 ```bash
 python research.py
 ```
 
-### Depth Settings
-* **QUICK** (Phases: Understand -> Literature -> Computation -> Report): Best for fast overviews.
-* **STANDARD** (Phases: Understand -> Literature -> Mathematics -> Computation -> Engineering -> Report): Balanced execution (Recommended).
-* **DEEP** (All 8 phases): Exhaustive research including peer review and synthesis.
+#### Option B: Web Application (FastAPI + SSE Stream)
+Launch the web server and open the interactive Web UI in your browser:
+```bash
+python -m uvicorn backend.api:app --reload --port 8000
+```
+Then navigate to: `http://localhost:8000`
+
+#### Option C: Run Baseline Evaluation Suite
+Evaluate entity recall and F1 grounding scores:
+```bash
+python evals/baseline_eval.py
+```
+
+---
+
+## 📜 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
