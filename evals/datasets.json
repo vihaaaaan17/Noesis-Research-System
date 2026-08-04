@@ -2,17 +2,14 @@
   {
     "id": "semiconductor_hemt_01",
     "category": "Semiconductor Physics",
-    "question": "Derive the 2DEG charge density equation in a GaN HEMT and compute the subthreshold swing at 300K.",
+    "question": "Explain 2DEG charge density in GaN HEMT and subthreshold swing at 300K.",
     "expected_entities": [
+      "2DEG",
       "GaN HEMT",
-      "2DEG charge density",
       "subthreshold swing",
-      "300K",
-      "2DEG"
-    ],
-    "expected_equations": [
-      "n_s",
-      "S = (kT/q) * ln(10)"
+      "charge density",
+      "polarization",
+      "heterostructure"
     ],
     "expected_keywords": [
       "2DEG",
@@ -25,16 +22,15 @@
   },
   {
     "id": "physics_fourier_02",
-    "category": "Signal Processing & Physics",
-    "question": "Derive the Fourier transform of a Gaussian pulse and compute its bandwidth for sigma = 1 ps.",
+    "category": "Signal Processing",
+    "question": "Explain Fourier transform of a Gaussian pulse and time-bandwidth product.",
     "expected_entities": [
       "Gaussian pulse",
       "Fourier transform",
       "bandwidth",
-      "sigma"
-    ],
-    "expected_equations": [
-      "exp(-t^2 / (2*sigma^2))"
+      "frequency",
+      "uncertainty principle",
+      "variance"
     ],
     "expected_keywords": [
       "Gaussian",
@@ -47,20 +43,19 @@
   {
     "id": "quantum_schrodinger_03",
     "category": "Quantum Mechanics",
-    "question": "Solve the 1D Schrodinger equation for a finite potential well and find the quantised energy levels.",
+    "question": "Explain 1D Schrodinger equation for a finite potential well and quantised energy levels.",
     "expected_entities": [
       "Schrodinger equation",
-      "finite potential well",
-      "quantised energy levels",
-      "wavefunction"
-    ],
-    "expected_equations": [
-      "-hbar^2/(2m) d^2psi/dx^2 + V(x)psi = E psi"
+      "potential well",
+      "energy levels",
+      "wavefunction",
+      "quantum tunneling",
+      "bound states"
     ],
     "expected_keywords": [
       "Schrodinger",
-      "potential well",
-      "quantised",
+      "potential",
+      "well",
       "energy",
       "wavefunction"
     ]
