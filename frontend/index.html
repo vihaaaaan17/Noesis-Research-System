@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="lab-bg">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>MAS Research</title>
+  <title>Noesis - Autonomous Multi-Agent Research System</title>
   
   <!-- Google Fonts: Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -20,21 +20,27 @@
 
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body class="lab-bg">
+
+  <!-- Ambient Glowing Orb Backdrop -->
+  <div class="noesis-backdrop">
+    <div class="glow-orb glow-orb-1"></div>
+    <div class="glow-orb glow-orb-2"></div>
+  </div>
 
   <div class="app-layout">
     
-    <!-- Sidebar (Gemini Style) -->
+    <!-- Sidebar -->
     <aside class="sidebar">
       <div class="sidebar-header">
         <button id="new-chat-btn" class="new-chat-btn">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-          New Chat
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          New research run
         </button>
       </div>
 
       <div class="sidebar-section">
-        <div class="section-title">Research Mode</div>
+        <div class="section-title">Research mode</div>
         <div class="mode-selector">
           <button class="mode-btn active" data-mode="standard">Standard</button>
           <button class="mode-btn" data-mode="quick">Quick</button>
@@ -42,8 +48,28 @@
         </div>
       </div>
 
+      <div class="sidebar-section">
+        <div class="section-title">Output format</div>
+        <select id="format-select" class="format-select">
+          <option value="explanation" selected>Multi-paragraph explanation</option>
+          <option value="paragraph">Single paragraph</option>
+          <option value="answer">Direct answer</option>
+          <option value="long_form">Long form answer</option>
+          <option value="research_paper">Full academic research paper</option>
+        </select>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="section-title">Activity visibility</div>
+        <label class="toggle-control">
+          <input type="checkbox" id="toggle-internal-activity" />
+          <span class="toggle-slider"></span>
+          <span class="toggle-label">Show internal activity</span>
+        </label>
+      </div>
+
       <div class="sidebar-section flex-1">
-        <div class="section-title">Recent Chats</div>
+        <div class="section-title">Research history</div>
         <div id="chat-history-list" class="chat-history-list">
           <!-- Populated dynamically -->
         </div>
@@ -52,7 +78,7 @@
       <div class="sidebar-footer">
         <div class="status-pill">
           <span class="status-dot"></span>
-          <span id="api-status">Ready</span>
+          <span id="api-status">Online · System active</span>
         </div>
       </div>
     </aside>
@@ -63,15 +89,18 @@
       <!-- Top Navbar -->
       <header class="top-nav">
         <div class="brand">
-          <svg class="gemini-spark" viewBox="0 0 24 24" width="22" height="22">
-            <path fill="currentColor" d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/>
+          <svg class="gemini-spark" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/>
           </svg>
-          <span class="brand-title">MAS Research</span>
+          <div>
+            <div class="brand-title">Noesis</div>
+            <div class="brand-subtitle">Autonomous multi-agent research system</div>
+          </div>
         </div>
 
         <div class="header-kg">
-          <span class="kg-pill">Nodes: <b id="kg-nodes">0</b></span>
-          <span class="kg-pill">Edges: <b id="kg-edges">0</b></span>
+          <span class="kg-pill">KG nodes · <b id="kg-nodes">0</b></span>
+          <span class="kg-pill">KG edges · <b id="kg-edges">0</b></span>
         </div>
       </header>
 
@@ -79,20 +108,65 @@
       <div id="chat-viewport" class="chat-viewport">
         <div id="chat-messages" class="chat-messages">
           <div class="welcome-screen" id="welcome-screen">
-            <div class="spark-large">✦</div>
-            <h1>What research problem shall we explore?</h1>
-            <p>Ask a research question or request a mathematical derivation.</p>
+            <div class="brand-badge">Autonomous multi-agent research system</div>
+            <h1>Noesis</h1>
+            <p>Enter a research question or request a technical derivation to trigger the multi-agent execution pipeline.</p>
+
+            <div class="command-chips">
+              <button class="cmd-pill-btn" onclick="insertCommand('/literature ')">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                Literature
+              </button>
+              <button class="cmd-pill-btn" onclick="insertCommand('/math ')">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"></rect><line x1="8" y1="12" x2="16" y2="12"></line><line x1="12" y1="8" x2="12" y2="16"></line></svg>
+                Mathematics
+              </button>
+              <button class="cmd-pill-btn" onclick="insertCommand('/compute ')">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line></svg>
+                Compute
+              </button>
+              <button class="cmd-pill-btn" onclick="insertCommand('/review ')">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                Review
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- Bottom Fixed Input Bar -->
       <div class="input-container">
+        
+        <!-- Command Suggestions Palette Popup -->
+        <div id="command-palette" class="command-palette-popup" style="display: none;">
+          <div class="command-item" onclick="insertCommand('/literature ')">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+            <span>Literature search</span>
+            <span class="cmd-shortcut">/literature</span>
+          </div>
+          <div class="command-item" onclick="insertCommand('/math ')">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect><line x1="8" y1="12" x2="16" y2="12"></line><line x1="12" y1="8" x2="12" y2="16"></line></svg>
+            <span>Math derivation</span>
+            <span class="cmd-shortcut">/math</span>
+          </div>
+          <div class="command-item" onclick="insertCommand('/compute ')">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect></svg>
+            <span>Compute evaluation</span>
+            <span class="cmd-shortcut">/compute</span>
+          </div>
+          <div class="command-item" onclick="insertCommand('/review ')">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            <span>Peer review</span>
+            <span class="cmd-shortcut">/review</span>
+          </div>
+        </div>
+
         <div class="input-box">
-          <textarea id="query-input" rows="1" placeholder="Ask a research prompt or follow-up cross-question..."></textarea>
-          <button id="send-btn" class="send-btn" title="Send">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          <textarea id="query-input" rows="1" placeholder="Ask Noesis a research question or type '/' for commands…"></textarea>
+          <button id="send-btn" class="send-btn" title="Run Research">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
             </svg>
           </button>
         </div>

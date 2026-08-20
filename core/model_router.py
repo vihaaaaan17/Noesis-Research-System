@@ -1,11 +1,15 @@
 """
 core/model_router.py
 ---------------------------------------------------------------------
-Smart Model Router for MAS.
+Smart Provider-Aware Model Router for MAS.
 
-Dynamically allocates Gemini models (Flash vs Pro) based on phase,
-pipeline execution depth ('quick', 'standard', 'deep'), and task complexity.
-Optimizes token budget, latency, and academic derivation precision.
+Separates Provider and Model concepts into structured route dictionaries:
+  {
+      "provider": "groq" | "gemini",
+      "model": "qwen/qwen3.6-27b",
+      "fallback_provider": "gemini",
+      "fallback_model": "gemini-3.6-flash"
+  }
 ---------------------------------------------------------------------
 """
 
@@ -17,107 +21,103 @@ import config
 
 init(autoreset=True)
 
-FLASH_MODEL = os.getenv("FLASH_MODEL", "llama-3.3-70b-versatile")
-PRO_MODEL = os.getenv("PRO_MODEL", "llama-3.3-70b-versatile")
-
 # Model pricing ($ / 1M tokens) for telemetry estimation
 MODEL_PRICING = {
-    "llama-3.1-8b-instant":  {"input": 0.05, "output": 0.08},
+    "llama-3.1-8b-instant":   {"input": 0.05, "output": 0.08},
     "llama-3.3-70b-versatile": {"input": 0.59, "output": 0.79},
-    "gemini-2.5-flash":       {"input": 0.075, "output": 0.30},
-    "gemini-2.5-pro":         {"input": 1.25,  "output": 5.00},
+    "qwen/qwen3.6-27b":        {"input": 0.20, "output": 0.50},
+    "gemini-2.5-flash":        {"input": 0.075, "output": 0.30},
+    "gemini-3.6-flash":        {"input": 0.075, "output": 0.30},
+    "gemini-2.5-pro":          {"input": 1.25,  "output": 5.00},
 }
 
 
 class SmartModelRouter:
     """
-    Dynamic model selection engine for multi-agent research pipelines.
+    Dynamic provider-aware model router for multi-agent research pipelines.
     """
 
-    # Default phase complexity mapping
     PHASE_COMPLEXITY = {
         "understand":  "low",
         "literature":  "medium",
         "mathematics": "high",
         "computation": "medium",
         "engineering": "medium",
-        "review":      "high",
-        "synthesis":   "high",
-        "report":      "high",
-        "judge":       "high"
+        "review":      "medium",
+        "synthesis":   "medium",
+        "report":      "medium",
+        "judge":       "medium"
     }
 
     def __init__(
         self,
         depth: str = "standard",
-        flash_model: str = FLASH_MODEL,
-        pro_model: str = PRO_MODEL,
+        groq_model: str = None,
+        gemini_research_model: str = None,
+        gemini_final_model: str = None,
         verbose: bool = True
     ):
         self.depth = depth.lower()
-        self.flash_model = flash_model
-        self.pro_model = pro_model
+        self.groq_model = groq_model or config.GROQ_MODEL
+        self.gemini_research_model = gemini_research_model or config.GEMINI_RESEARCH_MODEL
+        self.gemini_final_model = gemini_final_model or config.GEMINI_FINAL_MODEL
         self.verbose = verbose
 
-    def get_model_for_phase(self, phase_name: str, override_complexity: Optional[str] = None) -> str:
+    def get_route_for_phase(self, phase_name: str, override_complexity: Optional[str] = None) -> Dict[str, str]:
         """
-        Determine the optimal model for a given pipeline phase.
+        Determine provider and model route dictionary for a given phase.
+        Returns:
+          {"provider": ..., "model": ..., "fallback_provider": ..., "fallback_model": ...}
         """
         clean_phase = phase_name.lower().strip()
         complexity = override_complexity or self.PHASE_COMPLEXITY.get(clean_phase, "medium")
 
-        if os.getenv("USE_FLASH_ONLY", "").lower() in ["true", "1"]:
-            return self.flash_model
-
-        if self.depth == "quick":
-            # Quick mode: speed & low cost focus (uses Flash for all phases)
-            selected = self.flash_model
-        elif self.depth == "standard":
-            # Standard mode: Pro for mathematics/report, Flash for others
-            if clean_phase in ["mathematics", "report", "judge"] or complexity == "high":
-                selected = self.pro_model
-            else:
-                selected = self.flash_model
-        elif self.depth == "deep":
-            # Deep mode: Pro for math, review, synthesis, report & high complexity
-            if complexity in ["medium", "high"] or clean_phase in ["mathematics", "review", "synthesis", "report", "judge"]:
-                selected = self.pro_model
-            else:
-                selected = self.flash_model
+        # Stage 2: Final Report Phase is ALWAYS Gemini-only
+        if clean_phase in ["report", "final"]:
+            route = {
+                "provider": "gemini",
+                "model": self.gemini_final_model,
+                "fallback_provider": "gemini",
+                "fallback_model": self.gemini_final_model
+            }
         else:
-            selected = config.DEFAULT_MODEL or self.flash_model
+            # Stage 1: Research Phases default to Groq primary with Gemini fallback
+            route = {
+                "provider": "groq",
+                "model": self.groq_model,
+                "fallback_provider": "gemini",
+                "fallback_model": self.gemini_research_model
+            }
 
         if self.verbose:
-            print(f"{Fore.CYAN}[ModelRouter] Phase '{phase_name}' (depth={self.depth}, complexity={complexity}) -> {selected}{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}[ModelRouter] Phase '{phase_name}' (depth={self.depth}, complexity={complexity}) "
+                  f"-> provider={route['provider']} ({route['model']}) | fallback={route['fallback_provider']}{Style.RESET_ALL}")
 
-        return selected
+        return route
+
+    def get_model_for_phase(self, phase_name: str, override_complexity: Optional[str] = None) -> str:
+        """Backward compatible helper returning model string."""
+        return self.get_route_for_phase(phase_name, override_complexity)["model"]
 
     def get_model_for_agent(self, agent_name: str) -> str:
-        """
-        Determine the optimal model based on agent specialization.
-        """
-        clean_name = agent_name.lower()
-        if any(term in clean_name for term in ["mathematician", "reviewer", "judge", "writer"]):
-            return self.get_model_for_phase(clean_name, override_complexity="high")
-        return self.get_model_for_phase(clean_name, override_complexity="medium")
+        """Backward compatible helper for agents."""
+        return self.get_route_for_phase(agent_name)["model"]
 
     def estimate_cost(self, prompt_tokens: int, completion_tokens: int, model: str) -> float:
-        """
-        Estimate API cost in USD based on model pricing.
-        """
-        pricing = MODEL_PRICING.get(model, MODEL_PRICING["gemini-2.5-flash"])
+        """Estimate API cost in USD based on model pricing."""
+        pricing = MODEL_PRICING.get(model, MODEL_PRICING["gemini-3.6-flash"])
         input_cost = (prompt_tokens / 1_000_000.0) * pricing["input"]
         output_cost = (completion_tokens / 1_000_000.0) * pricing["output"]
         return round(input_cost + output_cost, 6)
 
     def print_routing_table(self) -> None:
-        """Print the active model allocation table for all phases."""
-        print(f"\n{Fore.CYAN}{'='*56}")
+        """Print active provider routing table for all phases."""
+        print(f"\n{Fore.CYAN}{'='*64}")
         print(f"  SMART MODEL ROUTER TABLE — Depth: {self.depth.upper()}")
-        print(f"{'='*56}{Style.RESET_ALL}")
-        print(f"  {'PHASE':<16} | {'COMPLEXITY':<12} | {'ALLOCATED MODEL':<20}")
-        print(f"{'-'*56}")
+        print(f"{'='*64}{Style.RESET_ALL}")
+        print(f"  {'PHASE':<14} | {'PROVIDER':<10} | {'PRIMARY MODEL':<20} | {'FALLBACK':<10}")
+        print(f"{'-'*64}")
         for phase, comp in self.PHASE_COMPLEXITY.items():
-            model = self.get_model_for_phase(phase)
-            print(f"  {phase:<16} | {comp:<12} | {model:<20}")
-        print(f"{'='*56}\n")
+            route = self.get_route_for_phase(phase)
+            print(f"  {phase:<14} | {route['provider']:<10} | {route['model']:<20} | {route['fallback_provider']:<10}")
+        print(f"{'='*64}\n")

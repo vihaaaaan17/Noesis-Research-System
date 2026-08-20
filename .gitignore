@@ -29,6 +29,15 @@ reports/*.json
 evals/temp_eval_kg_*.json
 evals/eval_kg.json
 
+# Node & frontend build files
+node_modules/
+frontend/node_modules/
+
+# Local databases & checkpoints
+chroma_db/
+reports/checkpoints/
+reports/sections/
+
 # Dev asset archives & skills
 archive/
 .agents/

@@ -3,9 +3,9 @@ backend/api.py
 ---------------------------------------------------------------------
 Production FastAPI Backend Server for MAS.
 
-Provides SSE real-time streaming endpoints for the 8-phase pipeline,
-Knowledge Graph inspection endpoints, report history lookup,
-and static file serving for the frontend UI.
+Thin transport layer providing SSE real-time streaming endpoints over
+ResearchOrchestrator, Knowledge Graph inspection, secured report lookup,
+and static frontend file serving.
 ---------------------------------------------------------------------
 """
 
@@ -14,25 +14,25 @@ import sys
 import json
 import asyncio
 import time
-from typing import Optional, AsyncGenerator
+from typing import Optional, AsyncGenerator, Dict, Any
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 # Ensure project root is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import config
-from memory.graph_memory import KnowledgeGraphMemory
+from memory.working_memory import WorkingMemory
+from memory.long_term import LongTermMemory
 from evals.telemetry import TelemetryLogger
-from core.model_router import SmartModelRouter
+from orchestrator import ResearchOrchestrator
 from agents.research_agents import (
     literature_scout, mathematician, engineer,
     numerical_analyst, peer_reviewer, synthesizer, report_writer
 )
-from agents.judge_agent import JudgeAgent
-from orchestrator import ResearchOrchestrator
 
 app = FastAPI(
     title="MAS - Research Agent System API",
@@ -64,30 +64,32 @@ def health_check():
 
 @app.get("/api/graph")
 def get_knowledge_graph():
-    """Return the active Knowledge Graph state."""
-    kg_path = os.path.join("reports", "research_kg.json")
-    kg = KnowledgeGraphMemory(storage_path=kg_path, verbose=False)
+    """Return the active Knowledge Graph state via clean memory interface."""
+    wm = WorkingMemory(verbose=False)
+    kg = wm.graph_memory
     val_stats = kg.validate()
 
-    nodes = []
-    for n, data in kg.graph.nodes(data=True):
-        nodes.append({
+    nodes = [
+        {
             "id": n,
             "label": n,
             "type": data.get("entity_type", "CONCEPT"),
             "description": data.get("description", ""),
             "key_facts": data.get("key_facts", []),
             "mentions": data.get("mention_count", 1)
-        })
+        }
+        for n, data in kg.graph.nodes(data=True)
+    ]
 
-    edges = []
-    for s, t, data in kg.graph.edges(data=True):
-        edges.append({
+    edges = [
+        {
             "source": s,
             "target": t,
             "predicate": data.get("predicate", "related_to"),
             "doc": data.get("source_document_id", "system")
-        })
+        }
+        for s, t, data in kg.graph.edges(data=True)
+    ]
 
     return {
         "summary": val_stats,
@@ -97,17 +99,20 @@ def get_knowledge_graph():
     }
 
 
+REPORTS_DIR = os.path.abspath("reports")
+os.makedirs(REPORTS_DIR, exist_ok=True)
+
+
 @app.get("/api/reports")
 def list_reports():
     """List all generated report files."""
-    reports_dir = "reports"
-    if not os.path.exists(reports_dir):
+    if not os.path.exists(REPORTS_DIR):
         return {"reports": []}
 
     files = []
-    for fname in os.listdir(reports_dir):
+    for fname in os.listdir(REPORTS_DIR):
         if fname.endswith(".md"):
-            fpath = os.path.join(reports_dir, fname)
+            fpath = os.path.join(REPORTS_DIR, fname)
             stat = os.stat(fpath)
             files.append({
                 "filename": fname,
@@ -120,175 +125,176 @@ def list_reports():
 
 @app.get("/api/reports/{filename}")
 def get_report(filename: str):
-    """Retrieve content of a specific report file."""
-    filepath = os.path.join("reports", filename)
-    if not os.path.exists(filepath):
+    """Retrieve content of a specific report file with strict path-traversal protection."""
+    target_path = os.path.abspath(os.path.join(REPORTS_DIR, filename))
+    if os.path.commonpath([target_path, REPORTS_DIR]) != REPORTS_DIR:
+        raise HTTPException(status_code=400, detail="Invalid report filename path traversal detected")
+
+    if not os.path.exists(target_path):
         raise HTTPException(status_code=404, detail="Report file not found")
-    with open(filepath, "r", encoding="utf-8") as f:
+
+    with open(target_path, "r", encoding="utf-8") as f:
         content = f.read()
     return {"filename": filename, "content": content}
 
 
 _ACTIVE_STREAM_LOCK = asyncio.Lock()
 
+
 @app.get("/api/research/stream")
 async def stream_research(
     question: str = Query(..., description="The research question to investigate"),
-    depth: str = Query("standard", description="Execution depth: quick, standard, deep")
+    depth: str = Query("standard", description="Execution depth: quick, standard, deep"),
+    mode: str = Query("research_paper", description="Generation mode: research_paper, long_form, explanation, paragraph, answer")
 ):
     """
     Stream real-time research execution events via SSE (Server-Sent Events).
+    Emits explicit structured event payloads with visibility and category.
     """
     async def event_generator() -> AsyncGenerator[str, None]:
         def send_event(event_type: str, data: dict) -> str:
             return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
         async with _ACTIVE_STREAM_LOCK:
-            yield send_event("status", {"message": f"Initializing Research Orchestrator ({depth.upper()} mode)..."})
-            await asyncio.sleep(0.2)
-
-        # Build orchestrator & shared KG
-        kg = KnowledgeGraphMemory(storage_path=os.path.join("reports", "research_kg.json"), verbose=False)
-        telemetry = TelemetryLogger(run_name=f"Web_Run_{depth}", verbose=False)
-
-        orc = ResearchOrchestrator(depth=depth, output_dir="reports", verbose=True, graph_memory=kg)
-        orc.register_agents(
-            scout=literature_scout(verbose=False),
-            mathematician=mathematician(verbose=False),
-            engineer=engineer(domain="semiconductor", verbose=False),
-            numerical=numerical_analyst(verbose=False),
-            reviewer=peer_reviewer(verbose=False),
-            synthesizer=synthesizer(verbose=False),
-            writer=report_writer(verbose=False),
-        )
-
-        active_phases = orc.DEPTH_PHASES.get(depth, orc.DEPTH_PHASES["standard"])
-        orc.doc["question"] = question
-
-        yield send_event("pipeline_start", {
-            "question": question,
-            "depth": depth,
-            "total_phases": len(active_phases),
-            "active_phases": [orc.PHASES[p][0] for p in active_phases]
-        })
-
-        for p_idx, phase_num in enumerate(active_phases, 1):
-            phase_name, phase_desc = orc.PHASES[phase_num]
-            telemetry.start_phase(phase_name)
-
-            yield send_event("phase_start", {
-                "phase_num": phase_num,
-                "step_index": p_idx,
-                "phase_name": phase_name,
-                "description": phase_desc
+            yield send_event("status", {
+                "visibility": "system",
+                "category": "PHASE_STATUS",
+                "message": f"Initializing Research Orchestrator ({depth.upper()} mode, mode='{mode}')..."
             })
+            await asyncio.sleep(0.1)
 
-            # Intermediate live thinking event so client sees real-time progress
-            yield send_event("thinking", {
-                "phase_name": phase_name,
-                "message": f"Reasoning & executing Phase {phase_num} ({phase_name}): {phase_desc}..."
-            })
+            working_mem = WorkingMemory(verbose=False)
+            long_term_mem = LongTermMemory(verbose=False)
+            telemetry = TelemetryLogger(run_name=f"Web_Run_{depth}", verbose=False)
 
-            await asyncio.sleep(0.3)
-
-            # Execute phase method
-            phase_method = getattr(orc, f"_phase_{phase_name.lower()}", None)
-            if phase_method:
-                # Run sync in thread pool to avoid blocking async loop
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, phase_method)
-                orc._log_phase(phase_name, result)
-            else:
-                result = f"Phase {phase_name} skipped."
-
-            val_stats = kg.validate()
-            telemetry.end_phase(
-                phase_name,
-                prompt_tokens=400 * p_idx,
-                completion_tokens=250 * p_idx,
-                kg_nodes=val_stats["num_nodes"],
-                kg_edges=val_stats["num_edges"]
+            orc = ResearchOrchestrator(
+                depth=depth,
+                mode=mode,
+                output_dir="reports",
+                verbose=True,
+                working_memory=working_mem,
+                long_term_memory=long_term_mem,
+                enable_judge=True
             )
 
-            yield send_event("kg_update", {
-                "phase": phase_name,
-                "num_nodes": val_stats["num_nodes"],
-                "num_edges": val_stats["num_edges"],
-                "triples_preview": kg.serialize_subgraph()[:300]
+            orc.register_agents(
+                scout=literature_scout(verbose=False),
+                mathematician=mathematician(verbose=False),
+                engineer=engineer(domain="general", verbose=False),
+                numerical=numerical_analyst(verbose=False),
+                reviewer=peer_reviewer(verbose=False),
+                synthesizer=synthesizer(verbose=False),
+                writer=report_writer(verbose=False),
+            )
+
+            active_phases = orc.DEPTH_PHASES.get(depth, orc.DEPTH_PHASES["standard"])
+
+            yield send_event("pipeline_start", {
+                "visibility": "system",
+                "category": "PHASE_STATUS",
+                "question": question,
+                "depth": depth,
+                "mode": mode,
+                "total_phases": len(active_phases),
+                "active_phases": [orc.PHASES[p][0] for p in active_phases]
             })
 
-            yield send_event("phase_complete", {
-                "phase_num": phase_num,
-                "phase_name": phase_name,
-                "result_preview": result[:400] + "..." if len(result) > 400 else result,
-                "full_result": result
+            # Execute pipeline non-blockingly via run_in_executor
+            loop = asyncio.get_event_loop()
+            result_future = loop.run_in_executor(None, orc.run, question)
+
+            # Stream thinking and status events while research runs
+            while not result_future.done():
+                completed = len(orc.completed_phases)
+                if completed < len(active_phases):
+                    current_p_num = active_phases[completed] if completed < len(active_phases) else active_phases[-1]
+                    p_name, p_desc = orc.PHASES[current_p_num]
+                    
+                    yield send_event("thinking", {
+                        "visibility": "internal",
+                        "category": "PHASE_STATUS",
+                        "phase_name": p_name,
+                        "phase_num": current_p_num,
+                        "total_phases": len(active_phases),
+                        "message": f"Executing Phase {current_p_num}/{len(active_phases)} ({p_name}): {p_desc}..."
+                    })
+
+                    val_stats = working_mem.graph_memory.validate()
+                    yield send_event("kg_update", {
+                        "visibility": "internal",
+                        "category": "MEMORY_ACTIVITY",
+                        "phase": p_name,
+                        "num_nodes": val_stats["num_nodes"],
+                        "num_edges": val_stats["num_edges"]
+                    })
+
+                await asyncio.sleep(1.0)
+
+            # Retrieve final result from future
+            try:
+                final_result = await result_future
+            except Exception as ex:
+                yield send_event("pipeline_error", {
+                    "visibility": "system",
+                    "category": "ERROR",
+                    "error": str(ex)
+                })
+                return
+
+            if orc.status == "PAUSED_RATE_LIMIT":
+                yield send_event("pipeline_paused", {
+                    "visibility": "system",
+                    "category": "PROVIDER_ACTIVITY",
+                    "status": "PAUSED_RATE_LIMIT",
+                    "run_id": orc.run_id,
+                    "message": "Research pipeline paused due to rate limits across all providers. Checkpoint saved."
+                })
+                return
+
+            # Export full budget & LLM telemetry record to disk
+            budget_metrics = orc.budget.get_summary()
+            with open(os.path.join("reports", "telemetry_last_run.json"), "w", encoding="utf-8") as tf:
+                json.dump(budget_metrics, tf, indent=2)
+
+            yield send_event("research_complete", {
+                "visibility": "user",
+                "category": "FINAL_RESPONSE",
+                "run_id": orc.run_id,
+                "status": orc.status,
+                "report_markdown": final_result,
+                "telemetry": budget_metrics
             })
-
-            await asyncio.sleep(0.5)
-
-        # Save report and evaluate with JudgeAgent
-        final_report = orc.doc["report"] or orc.doc["synthesis"]
-        outfile = orc._save_report(question, final_report)
-        kg.save_to_json()
-
-        # Run independent Judge evaluation
-        judge = JudgeAgent(model=orc.router.get_model_for_phase("judge"), verbose=False)
-        loop = asyncio.get_event_loop()
-        judge_result = await loop.run_in_executor(
-            None,
-            judge.evaluate,
-            question,
-            final_report,
-            kg.serialize_subgraph()
-        )
-
-        telemetry.export_json(os.path.join("reports", "telemetry_last_run.json"))
-
-        yield send_event("research_complete", {
-            "report_path": outfile,
-            "filename": os.path.basename(outfile),
-            "report_markdown": final_report,
-            "judge_result": judge_result,
-            "telemetry": telemetry.get_metrics()
-        })
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-from pydantic import BaseModel
 class FollowupRequest(BaseModel):
     question: str
     report_context: Optional[str] = ""
     history: Optional[list] = []
 
+
 @app.post("/api/chat/followup")
 def chat_followup(req: FollowupRequest):
-    """Interactive follow-up cross-question endpoint."""
-    # Include Knowledge Graph triples context
-    kg_path = os.path.join("reports", "research_kg.json")
-    kg = KnowledgeGraphMemory(storage_path=kg_path, verbose=False)
-    kg_triples = kg.serialize_subgraph()
+    """Interactive follow-up question endpoint using query-aware memory retrieval."""
+    wm = WorkingMemory(verbose=False)
+    query_context = wm.get_context(req.question)
 
-    system_instruction = (
-        "You are an expert AI research assistant. The user is asking a follow-up question "
-        "about a technical research report generated by your multi-agent system.\n"
-        "Answer with academic precision, using clear explanations and LaTeX math syntax ($...$ or $$...$$) where relevant.\n\n"
-        f"### GROUNDED RESEARCH CONTEXT:\n{req.report_context[:4000]}\n\n"
-        f"### KNOWLEDGE GRAPH MEMORY:\n{kg_triples[:2000]}"
-    )
+    messages = [
+        {"role": "system", "content": f"You are an AI research assistant. Answer the follow-up query using LaTeX for equations where appropriate.\n\n### RELEVANT MEMORY CONTEXT:\n{query_context}"}
+    ]
 
-    contents = []
     if req.history:
         for item in req.history:
-            contents.append({"role": item.get("role", "user"), "content": item.get("content", "")})
-    
-    contents.append({"role": "user", "content": req.question})
+            messages.append({"role": item.get("role", "user"), "content": item.get("content", "")})
 
-    answer = config.call_llm_api(
-        messages=contents,
-        system_instruction=system_instruction,
-        temperature=0.5,
-        max_tokens=2048
+    messages.append({"role": "user", "content": req.question})
+
+    answer = config.call_with_fallback(
+        messages=messages,
+        primary_model=config.GEMINI_FINAL_MODEL,
+        temperature=0.4,
+        max_tokens=2500
     )
     return {"answer": answer}
 

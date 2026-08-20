@@ -1,76 +1,79 @@
 """
 memory/long_term.py
 ---------------------------------------------------------------------
-Long-Term Memory
+Long-Term Semantic Memory
 
-Stores facts, results, and knowledge ACROSS sessions - survives
-process restarts. Backed by a plain JSON file on disk (no database,
-no vector store, no extra dependencies).
+Combines persistent structured facts (JSON key-value store) and a local
+ChromaDB Vector Database for semantic research chunk retrieval.
 
-What it stores:
-  * Key-value facts  ("user_name" -> "Arjun")
-  * Tagged notes     ({"tag": "research", "content": "GaN HEMTs have..."})
-  * Agent outputs    (results from previous runs you want to reuse)
-
-Search:
-  Simple keyword matching over stored content - no embeddings needed
-  for most practical multi-agent tasks. Fast and transparent.
-
-If you later want semantic search, just swap _keyword_search() for
-a vector store call (Chroma, FAISS, etc.) without changing any other code.
+Architecture:
+  LongTermMemory
+  ├── semantic_search()  --> ChromaDB Vector Collection
+  ├── recall_fact()      --> Structured JSON Facts
+  └── store()            --> Facts & Research Chunks
 ---------------------------------------------------------------------
 """
 
 import json
 import os
 import time
+from typing import List, Dict, Any, Optional
 from colorama import Fore, Style, init
 
 init(autoreset=True)
 
 DEFAULT_MEMORY_FILE = "long_term_memory.json"
+DEFAULT_CHROMA_DIR = "chroma_db"
 
 
 class LongTermMemory:
     """
-    Persistent key-value + searchable note store.
-
-    All data is saved to a JSON file after every write operation.
-    On initialization, any existing file is loaded automatically.
-
-    Parameters
-    ----------
-    filepath : str  - path to the JSON file (created if it doesn't exist)
-    verbose  : bool - print memory events to console
+    Long-Term Semantic Memory System.
+    Exposes a unified interface over persistent JSON facts and a local ChromaDB vector store.
     """
 
-    def __init__(self, filepath: str = DEFAULT_MEMORY_FILE, verbose: bool = True):
+    def __init__(
+        self,
+        filepath: str = DEFAULT_MEMORY_FILE,
+        chroma_db_dir: str = DEFAULT_CHROMA_DIR,
+        verbose: bool = True
+    ):
         self.filepath = filepath
-        self.verbose  = verbose
+        self.chroma_db_dir = chroma_db_dir
+        self.verbose = verbose
 
-        # Two internal stores:
-        #   facts  - simple key:value pairs  {"name": "Arjun"}
-        #   notes  - list of tagged content entries for search
         self._data: dict = {
             "facts": {},
             "notes": [],
         }
 
+        # 1. Initialize persistent JSON facts store
         self._load()
 
+        # 2. Initialize local ChromaDB Vector Store
+        self._chroma_client = None
+        self._collection = None
+        self._setup_chroma()
+
+    def _setup_chroma(self) -> None:
+        """Initialize ChromaDB local persistent client and collection."""
+        try:
+            import chromadb
+            os.makedirs(self.chroma_db_dir, exist_ok=True)
+            self._chroma_client = chromadb.PersistentClient(path=self.chroma_db_dir)
+            self._collection = self._chroma_client.get_or_create_collection(name="mas_research_memory")
+            if self.verbose:
+                print(f"{Fore.CYAN}[LongTermMemory] ChromaDB vector store initialized at '{self.chroma_db_dir}'{Style.RESET_ALL}")
+        except Exception as e:
+            if self.verbose:
+                print(f"{Fore.YELLOW}[LongTermMemory] ChromaDB setup warning: {e}. Falling back to local term search.{Style.RESET_ALL}")
+
     # -------------------------------------------------------------
-    # Facts - simple key-value store
+    # Facts - Structured Key-Value Store
     # -------------------------------------------------------------
 
     def remember(self, key: str, value: str) -> None:
-        """
-        Store a fact under a key.
-        Overwrites if the key already exists.
-
-        Example:
-            memory.remember("user_name", "Arjun")
-            memory.remember("project", "GaN HEMT compact model")
-        """
+        """Store a fact under a key."""
         self._data["facts"][key] = {
             "value":     value,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -78,158 +81,214 @@ class LongTermMemory:
         self._save()
 
         if self.verbose:
-            print(f"{Fore.GREEN}[LongTermMemory] Stored: "
-                  f"'{key}' = '{str(value)[:60]}'{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}[LongTermMemory] Stored fact: '{key}' = '{str(value)[:60]}'{Style.RESET_ALL}")
 
-    def recall(self, key: str) -> str | None:
-        """
-        Retrieve a fact by exact key.
-        Returns None if not found.
+    def remember_fact(self, key: str, value: str) -> None:
+        """Alias for remember()."""
+        self.remember(key, value)
 
-        Example:
-            name = memory.recall("user_name")  # -> "Arjun"
-        """
+    def recall(self, key: str) -> Optional[str]:
+        """Retrieve a fact by exact key."""
         entry = self._data["facts"].get(key)
         if entry:
             return entry["value"]
         return None
 
+    def recall_fact(self, key: str) -> Optional[str]:
+        """Alias for recall()."""
+        return self.recall(key)
+
     def forget(self, key: str) -> bool:
-        """Delete a fact by key. Returns True if it existed."""
+        """Delete a fact by key."""
         if key in self._data["facts"]:
             del self._data["facts"][key]
             self._save()
             if self.verbose:
-                print(f"{Fore.YELLOW}[LongTermMemory] Deleted: '{key}'{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}[LongTermMemory] Deleted fact: '{key}'{Style.RESET_ALL}")
             return True
         return False
 
     def all_facts(self) -> dict:
-        """Return all stored facts as {key: value} dict."""
+        """Return all stored facts as a dict."""
         return {k: v["value"] for k, v in self._data["facts"].items()}
 
     # -------------------------------------------------------------
-    # Notes - searchable tagged content
+    # Unified Store: Facts & Research Chunks
     # -------------------------------------------------------------
 
-    def add_note(self, content: str, tags: list[str] = None) -> int:
+    def store(
+        self,
+        content: Optional[str] = None,
+        key: Optional[str] = None,
+        value: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        tags: Optional[List[str]] = None
+    ) -> Any:
         """
-        Store a longer piece of content (a note) with optional tags.
-        Returns the note's ID.
-
-        Use this for:
-          * Saving agent outputs to reuse later
-          * Storing research findings
-          * Logging tool results worth keeping
-
-        Example:
-            memory.add_note(
-                "GaN HEMTs use a 2DEG at the AlGaN/GaN interface...",
-                tags=["research", "hemt", "semiconductor"]
-            )
+        Unified Store Interface:
+        - If key & value provided: stores structured fact.
+        - If content provided: stores research chunk into JSON notes & ChromaDB Vector store.
         """
+        if key and value:
+            self.remember_fact(key, value)
+            return key
+
+        if content:
+            return self.store_document(content, metadata=metadata or {"tags": tags or []})
+
+        return None
+
+    def store_document(self, content: str, metadata: Optional[dict] = None) -> int:
+        """
+        Store reusable research document chunk/finding in JSON storage AND ChromaDB Vector collection.
+        Metadata: (source, phase, topic, agent, timestamp, confidence, document_id).
+        """
+        meta = metadata or {}
+        doc_id = len(self._data["notes"])
+        doc_id_str = f"doc_{doc_id}_{int(time.time())}"
+
         note = {
-            "id":        len(self._data["notes"]),
-            "content":   content,
-            "tags":      tags or [],
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "id":          doc_id,
+            "doc_id":      doc_id_str,
+            "content":     content,
+            "tags":        meta.get("tags", []),
+            "metadata":    meta,
+            "timestamp":   time.strftime("%Y-%m-%d %H:%M:%S"),
         }
         self._data["notes"].append(note)
         self._save()
 
+        # Ingest into ChromaDB collection
+        if self._collection:
+            try:
+                # Sanitize metadata values to simple primitives for ChromaDB
+                clean_meta = {}
+                for k, v in meta.items():
+                    if isinstance(v, (str, int, float, bool)):
+                        clean_meta[k] = v
+                    elif isinstance(v, list):
+                        clean_meta[k] = ",".join(str(item) for item in v)
+                clean_meta["timestamp"] = note["timestamp"]
+
+                self._collection.upsert(
+                    documents=[content],
+                    metadatas=[clean_meta],
+                    ids=[doc_id_str]
+                )
+            except Exception as e:
+                if self.verbose:
+                    print(f"{Fore.YELLOW}[LongTermMemory] ChromaDB upsert warning: {e}{Style.RESET_ALL}")
+
         if self.verbose:
-            print(f"{Fore.GREEN}[LongTermMemory] Note #{note['id']} saved "
-                  f"| tags={tags} | '{content[:60]}...'{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}[LongTermMemory] Stored research chunk #{doc_id} in Vector DB | meta={meta} | '{content[:60]}...'{Style.RESET_ALL}")
 
-        return note["id"]
+        return doc_id
 
-    def search(self, query: str, top_k: int = 3) -> list[dict]:
+    def add_note(self, content: str, tags: Optional[List[str]] = None) -> int:
+        """Alias for store_document."""
+        return self.store_document(content, metadata={"tags": tags or []})
+
+    # -------------------------------------------------------------
+    # Semantic Retrieval (ChromaDB Vector Store)
+    # -------------------------------------------------------------
+
+    def search(self, query: str, top_k: int = 3) -> List[dict]:
+        """Search notes / research chunks using ChromaDB semantic search."""
+        return self.semantic_search(query, top_k=top_k)
+
+    def semantic_search(self, query: str, top_k: int = 3) -> List[dict]:
         """
-        Search notes by keyword relevance.
-
-        Scores each note by how many query words appear in it,
-        then returns the top_k most relevant notes.
-
-        Parameters
-        ----------
-        query : str  - natural language or keyword query
-        top_k : int  - max number of results to return
-
-        Returns
-        -------
-        list of note dicts, sorted by relevance score (highest first)
-
-        Example:
-            results = memory.search("GaN HEMT 2DEG")
-            for r in results:
-                print(r["content"])
+        Perform semantic search across ChromaDB Vector Collection.
+        Falls back to term frequency search if ChromaDB is empty or uninitialized.
         """
-        query_words = set(query.lower().split())
-        scored      = []
+        if not query:
+            return []
 
+        # Step 1: Query ChromaDB Vector Collection
+        if self._collection:
+            try:
+                results = self._collection.query(
+                    query_texts=[query],
+                    n_results=min(top_k, max(1, self._collection.count()))
+                )
+                formatted = []
+                if results and "documents" in results and results["documents"]:
+                    docs = results["documents"][0]
+                    metas = results.get("metadatas", [[]])[0]
+                    ids = results.get("ids", [[]])[0]
+                    distances = results.get("distances", [[]])[0] if "distances" in results else [0.0]*len(docs)
+
+                    for d, m, i, dist in zip(docs, metas, ids, distances):
+                        formatted.append({
+                            "doc_id": i,
+                            "content": d,
+                            "metadata": m,
+                            "_score": round(1.0 / (1.0 + dist), 4) if dist is not None else 1.0
+                        })
+
+                if formatted:
+                    if self.verbose:
+                        print(f"{Fore.CYAN}[LongTermMemory] ChromaDB Vector Search '{query}' -> {len(formatted)} result(s){Style.RESET_ALL}")
+                    return formatted
+            except Exception as e:
+                if self.verbose:
+                    print(f"{Fore.YELLOW}[LongTermMemory] ChromaDB search error: {e}. Running local term search.{Style.RESET_ALL}")
+
+        # Step 2: Fallback local term frequency search over JSON notes
+        query_words = [w.lower() for w in query.split() if len(w) > 2]
+        if not query_words or not self._data["notes"]:
+            return []
+
+        scored = []
         for note in self._data["notes"]:
-            text       = (note["content"] + " " + " ".join(note["tags"])).lower()
-            note_words = set(text.split())
-
-            # Score = number of query words that appear in the note
-            score = len(query_words & note_words)
-
+            text = (note["content"] + " " + " ".join(note.get("tags", []))).lower()
+            score = sum(text.count(w) for w in query_words)
             if score > 0:
                 scored.append({**note, "_score": score})
 
-        # Sort by score descending
         scored.sort(key=lambda x: x["_score"], reverse=True)
-        results = scored[:top_k]
+        return scored[:top_k]
 
-        if self.verbose:
-            print(f"{Fore.CYAN}[LongTermMemory] Search '{query}' -> "
-                  f"{len(results)} result(s){Style.RESET_ALL}")
-
-        return results
-
-    def get_note(self, note_id: int) -> dict | None:
-        """Retrieve a specific note by ID."""
+    def get_note(self, note_id: int) -> Optional[dict]:
+        """Retrieve a note by ID."""
         for note in self._data["notes"]:
             if note["id"] == note_id:
                 return note
         return None
 
-    def all_notes(self) -> list[dict]:
+    def all_notes(self) -> List[dict]:
         """Return all stored notes."""
         return list(self._data["notes"])
 
     # -------------------------------------------------------------
-    # Context injection helper
+    # Context Retrieval Interface
     # -------------------------------------------------------------
 
-    def build_context_string(self, query: str = None, max_facts: int = 10) -> str:
-        """
-        Build a formatted string of relevant memory to inject into
-        an agent's context before a task.
+    def get_context(self, query: str = "", max_facts: int = 5) -> str:
+        """Query-aware Long-Term Memory context retrieval."""
+        return self.build_context_string(query=query, max_facts=max_facts)
 
-        If query is given, searches notes for relevant ones.
-        Always includes all stored facts.
-
-        Example:
-            context = memory.build_context_string("HEMT research")
-            agent.inject_context(context)
-        """
+    def build_context_string(self, query: Optional[str] = None, max_facts: int = 5) -> str:
+        """Build formatted string of facts and semantic vector search chunks."""
         lines = ["[Long-Term Memory Context]"]
 
-        # Add facts
+        # 1. Facts
         facts = self.all_facts()
         if facts:
             lines.append("\nKnown facts:")
             for key, val in list(facts.items())[:max_facts]:
                 lines.append(f"  * {key}: {val}")
 
-        # Add relevant notes if query given
+        # 2. Vector Semantic Research Chunks
         if query:
-            notes = self.search(query, top_k=3)
-            if notes:
-                lines.append(f"\nRelevant notes for '{query}':")
-                for note in notes:
-                    lines.append(f"  [Note #{note['id']}] {note['content'][:200]}")
+            chunks = self.semantic_search(query, top_k=3)
+            if chunks:
+                lines.append(f"\nSemantic Research Chunks for '{query}':")
+                for chunk in chunks:
+                    lines.append(f"  [Chunk #{chunk.get('doc_id', 'note')}] {chunk['content'][:200]}")
+
+        if len(lines) == 1:
+            return ""
 
         return "\n".join(lines)
 
@@ -238,50 +297,44 @@ class LongTermMemory:
     # -------------------------------------------------------------
 
     def _save(self) -> None:
-        """Write current memory to the JSON file."""
+        """Write facts and notes to JSON file."""
         with open(self.filepath, "w", encoding="utf-8") as f:
             json.dump(self._data, f, indent=2, ensure_ascii=False)
 
     def _load(self) -> None:
-        """Load memory from the JSON file if it exists."""
+        """Load facts and notes from JSON file."""
         if not os.path.exists(self.filepath):
-            if self.verbose:
-                print(f"{Fore.CYAN}[LongTermMemory] No existing file at "
-                      f"'{self.filepath}'. Starting fresh.{Style.RESET_ALL}")
             return
-
         try:
             with open(self.filepath, "r", encoding="utf-8") as f:
-                loaded = json.load(f)
-            self._data = loaded
-            if self.verbose:
-                n_facts = len(self._data.get("facts", {}))
-                n_notes = len(self._data.get("notes", []))
-                print(f"{Fore.CYAN}[LongTermMemory] Loaded from '{self.filepath}': "
-                      f"{n_facts} facts, {n_notes} notes.{Style.RESET_ALL}")
-        except (json.JSONDecodeError, KeyError) as e:
-            print(f"{Fore.RED}[LongTermMemory] Failed to load '{self.filepath}': "
-                      f"{e}. Starting fresh.{Style.RESET_ALL}")
+                self._data = json.load(f)
+        except Exception:
+            pass
 
     def wipe(self) -> None:
-        """Delete all memory (facts + notes) and clear the file."""
+        """Delete all memory (facts + vector database)."""
         self._data = {"facts": {}, "notes": []}
         self._save()
+        if self._collection:
+            try:
+                self._chroma_client.delete_collection("mas_research_memory")
+                self._collection = self._chroma_client.get_or_create_collection("mas_research_memory")
+            except Exception:
+                pass
         if self.verbose:
             print(f"{Fore.RED}[LongTermMemory] All memory wiped.{Style.RESET_ALL}")
 
-    # -------------------------------------------------------------
-    # Utility
-    # -------------------------------------------------------------
-
     def stats(self) -> dict:
+        vector_count = self._collection.count() if self._collection else 0
         return {
-            "facts":    len(self._data["facts"]),
-            "notes":    len(self._data["notes"]),
+            "facts": len(self._data["facts"]),
+            "notes": len(self._data["notes"]),
+            "vector_chunks": vector_count,
             "filepath": self.filepath,
+            "chroma_dir": self.chroma_db_dir,
         }
 
     def __repr__(self):
         s = self.stats()
         return (f"LongTermMemory(facts={s['facts']}, "
-                f"notes={s['notes']}, file={s['filepath']!r})")
+                f"vector_chunks={s['vector_chunks']}, file={s['filepath']!r})")

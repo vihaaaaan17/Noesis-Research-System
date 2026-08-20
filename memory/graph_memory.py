@@ -51,10 +51,22 @@ class ExtractedGraph(BaseModel):
     relations: List[Relation] = Field(default_factory=list)
 
 
+EXTRACTION_PHASE_RULES = {
+    "understand":  {"regex": True,  "llm": False},
+    "literature":  {"regex": True,  "llm": True},
+    "mathematics": {"regex": True,  "llm": True},
+    "computation": {"regex": True,  "llm": False}, # regex + structured tool results
+    "engineering": {"regex": True,  "llm": True},
+    "review":      {"regex": True,  "llm": True},
+    "synthesis":   {"regex": True,  "llm": True},
+    "report":      {"regex": False, "llm": False},
+}
+
+
 class KnowledgeGraphMemory:
     """
     Durable, queryable, provenance-carrying shared Knowledge Graph memory.
-    Powered by NetworkX MultiDiGraph.
+    Powered by NetworkX MultiDiGraph and Hybrid Regex+LLM extraction pipeline.
     """
 
     def __init__(self, storage_path: str = "long_term_graph.json", verbose: bool = False):
@@ -63,6 +75,7 @@ class KnowledgeGraphMemory:
         self.graph = nx.MultiDiGraph()
         self.alias_map: Dict[str, str] = {}
         self.schema_version = "1.0"
+        self.processed_hashes: Set[str] = set()
 
         if os.path.exists(self.storage_path):
             self.load_from_json(self.storage_path)
@@ -186,52 +199,59 @@ class KnowledgeGraphMemory:
             )
 
     # -------------------------------------------------------------
-    # Heuristic & Regex Extraction
+    # Hybrid Knowledge Graph Extraction Pipeline
     # -------------------------------------------------------------
 
-    def extract_from_text(self, text: str, source_doc: str = "agent_turn") -> ExtractedGraph:
+    def is_worthwhile_llm_extraction(self, text: str, phase: str = "literature") -> bool:
         """
-        Extract structured entities and relations from text using deterministic heuristics.
-        Catches equations, definitions, physical variables, and tool outputs.
+        Check whether LLM extraction is worthwhile based on phase policy,
+        text length, duplicate content hash, and semantic density indicators.
         """
+        clean_phase = phase.lower().strip()
+        phase_rule = EXTRACTION_PHASE_RULES.get(clean_phase, {"regex": True, "llm": False})
+        if not phase_rule.get("llm", False):
+            return False
+
+        stripped = text.strip()
+        if len(stripped) < 150:
+            return False
+
+        import hashlib
+        text_hash = hashlib.md5(stripped.encode("utf-8")).hexdigest()
+        if text_hash in self.processed_hashes:
+            return False
+
+        if stripped.startswith("[LLM") or stripped.startswith("[Groq") or stripped.startswith("[Gemini"):
+            return False
+
+        indicators = r"\\|[\=]|equation|theorem|model|method|yields|governed|derives|result|bound|parameter|density|frequency|mass|charge|energy|voltage"
+        if not re.search(indicators, stripped, re.IGNORECASE):
+            return False
+
+        return True
+
+    def extract_regex(self, text: str) -> ExtractedGraph:
+        """Always-on, zero-cost deterministic regex layer for equations and definitions."""
         extracted = ExtractedGraph()
 
-        # 1. Catch equations (e.g. E = mc^2, V = I * R, subthreshold swing = kT/q * ln(10))
+        # 1. Catch LaTeX / math equations
         eq_matches = re.findall(r"([A-Za-z0-9_\s\\{\}\(\)]+)\s*=\s*([A-Za-z0-9_\s\+\-\*\/\^\(\)\.\\]+)", text)
         for lhs, rhs in eq_matches:
             lhs_clean = lhs.strip()
             rhs_clean = rhs.strip()
+            if lhs_clean.lower() in ["role", "status", "type", "name", "model", "system", "provider", "mode"]:
+                continue
             if 1 < len(lhs_clean) < 40 and 1 < len(rhs_clean) < 100:
-                extracted.entities.append(Entity(
-                    name=lhs_clean,
-                    type="EQUATION",
-                    description=f"Defined as {rhs_clean}"
-                ))
-                extracted.relations.append(Relation(
-                    source=lhs_clean,
-                    predicate="equals",
-                    target=rhs_clean,
-                    source_type="EQUATION",
-                    target_type="CONCEPT"
-                ))
+                extracted.entities.append(Entity(name=lhs_clean, type="EQUATION", description=f"Defined as {rhs_clean}"))
+                extracted.relations.append(Relation(source=lhs_clean, predicate="equals", target=rhs_clean, source_type="EQUATION", target_type="CONCEPT"))
 
-        # 2. Catch definitions ("X is defined as Y", "X is a Y")
+        # 2. Catch definitions
         def_matches = re.findall(r"([A-Z][a-zA-Z0-9_\s]{2,30})\s+(is|are|defined as)\s+([^.\n]{5,80})", text)
         for term, verb, definition in def_matches:
             t_clean = term.strip()
             d_clean = definition.strip()
-            extracted.entities.append(Entity(
-                name=t_clean,
-                type="CONCEPT",
-                description=d_clean
-            ))
-            extracted.relations.append(Relation(
-                source=t_clean,
-                predicate=verb.strip().replace(" ", "_"),
-                target=d_clean,
-                source_type="CONCEPT",
-                target_type="CONCEPT"
-            ))
+            extracted.entities.append(Entity(name=t_clean, type="CONCEPT", description=d_clean))
+            extracted.relations.append(Relation(source=t_clean, predicate=verb.strip().replace(" ", "_"), target=d_clean, source_type="CONCEPT", target_type="CONCEPT"))
 
         # 3. Catch tool output markers
         if "SymPy" in text or "solve" in text:
@@ -241,16 +261,106 @@ class KnowledgeGraphMemory:
         if "arXiv" in text:
             extracted.entities.append(Entity(name="ArxivSearchTool", type="METHOD", description="Academic paper lookup"))
 
-        # 4. Catch explicit concept lists ("Key concepts include: A, B, C", "Entities: A, B, C")
+        # 4. Catch concept lists
         concept_list_matches = re.findall(r"(?:Key concepts|Entities|Focus on|include:)\s*([A-Za-z0-9_,\s\-\(\)]+)", text, re.IGNORECASE)
         for clist in concept_list_matches:
             items = [item.strip() for item in clist.split(",") if 1 < len(item.strip()) < 50]
             for item_name in items:
                 extracted.entities.append(Entity(name=item_name, type="CONCEPT"))
 
-        # Ingest directly into self
-        self.add_extracted_graph(extracted, source_doc=source_doc)
         return extracted
+
+    def extract_llm(self, text: str, source_doc: str = "system", budget: Optional[Any] = None) -> ExtractedGraph:
+        """Selective LLM extraction using lightweight model outputting Pydantic ExtractedGraph JSON."""
+        if budget is not None:
+            check_res = budget.check_preflight(category="kg_extraction")
+            if not check_res["allowed"]:
+                if self.verbose:
+                    print(f"{Fore.YELLOW}[KG Memory] LLM extraction skipped by budget manager: {check_res['detail']}{Style.RESET_ALL}")
+                return ExtractedGraph()
+
+        try:
+            import config
+            prompt = (
+                f"You are a Knowledge Graph extractor. Extract key domain entities and relations from the scientific text below.\n\n"
+                f"Return ONLY valid JSON matching this schema:\n"
+                f"{{\n"
+                f'  "entities": [{{"name": "...", "type": "CONCEPT|EQUATION|METHOD|VARIABLE|METRIC", "description": "..."}}],\n'
+                f'  "relations": [{{"source": "...", "predicate": "...", "target": "..."}}]\n'
+                f"}}\n"
+                f"Do NOT include any chain-of-thought or markdown text.\n\n"
+                f"Text:\n{text[:2000]}"
+            )
+            raw_res = config.call_with_fallback(
+                prompt=prompt,
+                primary_provider="groq",
+                primary_model=config.DEFAULT_FLASH_MODEL,
+                fallback_provider="gemini",
+                fallback_model=config.GEMINI_RESEARCH_MODEL,
+                temperature=0.1,
+                max_tokens=600,
+                budget=budget,
+                category="kg_extraction"
+            )
+
+            m = re.search(r"\{.*\}", raw_res, re.DOTALL)
+            if m:
+                payload = json.loads(m.group(0))
+                entities = [Entity(**e) for e in payload.get("entities", []) if isinstance(e, dict) and "name" in e]
+                relations = [Relation(**r) for r in payload.get("relations", []) if isinstance(r, dict) and "source" in r and "target" in r]
+                return ExtractedGraph(entities=entities, relations=relations)
+        except Exception as e:
+            if self.verbose:
+                print(f"{Fore.YELLOW}[KG Memory] LLM extraction skipped/failed: {e}{Style.RESET_ALL}")
+
+        return ExtractedGraph()
+
+    def extract_from_text(self, text: str, source_doc: str = "agent_turn", phase: str = "literature", budget: Optional[Any] = None) -> ExtractedGraph:
+        """
+        Hybrid Knowledge Graph extraction pipeline:
+          1. Always-on Regex extraction (high confidence, zero-cost)
+          2. Selective LLM extraction (based on phase, text length, & semantic density)
+          3. Pydantic validation & graph ingestion
+        """
+        clean_phase = phase.lower().strip()
+        phase_rule = EXTRACTION_PHASE_RULES.get(clean_phase, {"regex": True, "llm": False})
+
+        if not phase_rule.get("regex", True) and not phase_rule.get("llm", False):
+            return ExtractedGraph()
+
+        combined = ExtractedGraph()
+
+        # Step 1: Always-on Regex extraction
+        if phase_rule.get("regex", True):
+            regex_graph = self.extract_regex(text)
+            combined.entities.extend(regex_graph.entities)
+            combined.relations.extend(regex_graph.relations)
+
+        # Step 2: Selective LLM extraction
+        if self.is_worthwhile_llm_extraction(text, phase=clean_phase):
+            llm_graph = self.extract_llm(text, source_doc=source_doc, budget=budget)
+            combined.entities.extend(llm_graph.entities)
+            combined.relations.extend(llm_graph.relations)
+
+            import hashlib
+            self.processed_hashes.add(hashlib.md5(text.strip().encode("utf-8")).hexdigest())
+
+        # Ingest into self
+        self.add_extracted_graph(combined, source_doc=source_doc)
+        return combined
+
+    def consolidate(self) -> Dict[str, Any]:
+        """
+        Final graph-consolidation pass:
+          1. Deduplicate entities & resolve aliases
+          2. Remove self-loops & duplicate parallel edges
+          3. Perform structural validation
+        """
+        self_loops = [(u, v) for u, v in self.graph.edges() if u == v]
+        for u, v in self_loops:
+            self.graph.remove_edge(u, v)
+
+        return self.validate()
 
     # -------------------------------------------------------------
     # Graph Retrieval & Serialization

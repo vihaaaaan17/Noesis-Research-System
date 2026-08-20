@@ -1,11 +1,9 @@
 """
 orchestrator/research_orchestrator.py
 ---------------------------------------------------------------------
-The Research Orchestrator - 8-phase structured research pipeline
+The Research Orchestrator - Workflow Controller for MAS
 
-Unlike the general Orchestrator (which is fully dynamic), this one
-has opinionated phases that mirror how real research actually works:
-
+Coordinates multi-agent research pipelines across 8 structured phases:
   Phase 1 - UNDERSTAND    : decompose the question
   Phase 2 - LITERATURE    : search papers and background
   Phase 3 - MATHEMATICS   : derive/verify equations
@@ -13,39 +11,37 @@ has opinionated phases that mirror how real research actually works:
   Phase 5 - ENGINEERING   : apply real-world constraints
   Phase 6 - REVIEW        : peer-review the findings
   Phase 7 - SYNTHESIZE    : combine everything coherently
-  Phase 8 - REPORT        : produce the final document
+  Phase 8 - REPORT        : produce the final document via LongFormGenerator
 
-Key design choices:
-  * Each phase is driven by a specific agent
-  * Outputs accumulate in a shared research_document dict
-  * The peer reviewer can flag issues that trigger re-runs
-  * Final output is a full markdown report saved to disk
+Features:
+  * Durable checkpointing (reports/checkpoints/<run_id>.json)
+  * Clean PAUSED_RATE_LIMIT handling when providers are exhausted
+  * Resume from interrupted checkpoint without re-running completed phases
+  * Memory integration via WorkingMemory and LongTermMemory
+  * Optional Judge evaluation gate
 ---------------------------------------------------------------------
 """
 
 import os
 import time
+import json
+import re
+from typing import Dict, Any, List, Optional
 from colorama import Fore, Style, init
-import google.generativeai as genai
+
 import config
+from memory.working_memory import WorkingMemory
+from memory.long_term import LongTermMemory
+from core.report_generator import LongFormGenerator
+from agents.judge_agent import JudgeAgent
 
 init(autoreset=True)
 
 
 class ResearchOrchestrator:
     """
-    An 8-phase research orchestrator that drives specialist agents
-    through a structured investigation of any research question.
-
-    Parameters
-    ----------
-    question       : str  - the research question (set in run())
-    depth          : str  - "quick" | "standard" | "deep"
-                           quick    = phases 1,2,4,8     (~fast, surface-level)
-                           standard = phases 1,2,3,4,5,8  (~balanced)
-                           deep     = all 8 phases         (~exhaustive)
-    output_dir     : str  - folder to save the final report
-    verbose        : bool - print progress to console
+    Workflow Controller driving specialist agents through structured research pipelines,
+    managing memory ingestion, durable checkpointing, and rate-limit pause/resume states.
     """
 
     PHASES = {
@@ -67,28 +63,34 @@ class ResearchOrchestrator:
 
     def __init__(
         self,
-        depth:        str  = "standard",
-        output_dir:   str  = "reports",
-        verbose:      bool = True,
-        graph_memory       = None,
+        depth: str = "standard",
+        mode: str = "research_paper",
+        output_dir: str = "reports",
+        verbose: bool = True,
+        working_memory: Optional[WorkingMemory] = None,
+        long_term_memory: Optional[LongTermMemory] = None,
+        enable_judge: bool = False,
     ):
-        self.depth      = depth
+        self.depth = depth
+        self.mode = mode
         self.output_dir = output_dir
-        self.verbose    = verbose
+        self.verbose = verbose
+        self.enable_judge = enable_judge
 
-        os.makedirs(self.output_dir, exist_ok=True)
+        self.checkpoint_dir = os.path.join(self.output_dir, "checkpoints")
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
 
-        # Knowledge Graph Shared Memory
-        if graph_memory is not None:
-            self.graph_memory = graph_memory
-        else:
-            from memory.graph_memory import KnowledgeGraphMemory
-            self.graph_memory = KnowledgeGraphMemory(
-                storage_path=os.path.join(self.output_dir, "research_kg.json"),
-                verbose=self.verbose
-            )
+        # Initialize Working Memory & Long-Term Memory
+        self.working_memory = working_memory or WorkingMemory(verbose=self.verbose)
+        self.long_term_memory = long_term_memory or LongTermMemory(verbose=self.verbose)
+        self.graph_memory = self.working_memory.graph_memory
 
-        # Research document - accumulates findings across phases
+        # Initialize Centralized LLM Budget Manager
+        from core.budget_manager import LLMBudgetManager
+        self.budget = LLMBudgetManager(depth=self.depth)
+        self.working_memory.budget = self.budget
+
+        # Research document metadata dictionary (for backward compatibility)
         self.doc: dict = {
             "question":    "",
             "understand":  "",
@@ -101,38 +103,32 @@ class ResearchOrchestrator:
             "report":      "",
         }
 
-        # Smart Model Router (Flash vs Pro allocation)
+        # Smart Model Router
         from core.model_router import SmartModelRouter
         self.router = SmartModelRouter(depth=self.depth, verbose=self.verbose)
 
-        # Agent registry - populated by register_agents()
+        # Agent registry & execution status
         self._agents: dict = {}
-
-        # Execution log
         self.log: list = []
-
-        # Configure Gemini
-        if config.GEMINI_API_KEY:
-            genai.configure(api_key=config.GEMINI_API_KEY)
+        self.status = "CREATED"
+        self.run_id: Optional[str] = None
+        self.completed_phases: List[str] = []
 
     # -------------------------------------------------------------
-    # Agent setup
+    # Agent Registration
     # -------------------------------------------------------------
 
     def register_agents(
         self,
-        scout         = None,
-        mathematician = None,
-        engineer      = None,
-        numerical     = None,
-        reviewer      = None,
-        synthesizer   = None,
-        writer        = None,
+        scout=None,
+        mathematician=None,
+        engineer=None,
+        numerical=None,
+        reviewer=None,
+        synthesizer=None,
+        writer=None,
     ) -> "ResearchOrchestrator":
-        """
-        Register specialist agents for each phase.
-        Attaches the shared Knowledge Graph memory and dynamically routes models.
-        """
+        """Register specialist agents for each phase and route models."""
         provided = {
             "literature":  scout,
             "mathematics": mathematician,
@@ -145,359 +141,304 @@ class ResearchOrchestrator:
 
         for phase_key, agent in provided.items():
             if agent is not None:
-                agent.graph_memory = self.graph_memory
-                # Dynamically set model based on SmartModelRouter phase allocation
+                agent.working_memory = self.working_memory
+                agent.long_term_memory = self.long_term_memory
+                agent.budget = self.budget
                 agent.model = self.router.get_model_for_phase(phase_key)
                 self._agents[phase_key] = agent
 
         if self.verbose:
-            print(f"{Fore.CYAN}[ResearchOrchestrator] Registered agents with Smart Model Router & Shared KG memory: "
-                  f"{list(self._agents.keys())}{Style.RESET_ALL}")
+            config.safe_print(
+                f"{Fore.CYAN}[ResearchOrchestrator] Registered specialist agents for phases: "
+                f"{list(self._agents.keys())}{Style.RESET_ALL}"
+            )
         return self
 
     # -------------------------------------------------------------
-    # Main entry point
+    # Execution & Resumption
     # -------------------------------------------------------------
 
-    def run(self, question: str) -> str:
+    def run(self, question: str, resume_checkpoint_id: Optional[str] = None) -> str:
         """
-        Run the full research pipeline on a question.
-
-        Returns the final report as a string and saves it to disk.
+        Run or resume the research pipeline for a question.
+        Returns final generated document or report string.
         """
         self.doc["question"] = question
-        active_phases = self.DEPTH_PHASES.get(self.depth, self.DEPTH_PHASES["standard"])
+        active_phase_indices = self.DEPTH_PHASES.get(self.depth, self.DEPTH_PHASES["standard"])
 
-        self._print_header(question, active_phases)
-
-        for phase_num in active_phases:
-            phase_name, phase_desc = self.PHASES[phase_num]
-            self._print_phase(phase_num, phase_name, phase_desc)
-
-            # Run the appropriate phase
-            phase_method = getattr(self, f"_phase_{phase_name.lower()}", None)
-            if phase_method:
-                result = phase_method()
-                self._log_phase(phase_name, result)
-            else:
+        # Check for checkpoint resume
+        if resume_checkpoint_id or not self.run_id:
+            chk = self._load_checkpoint(resume_checkpoint_id or self._generate_run_id(question))
+            if chk:
+                self.run_id = chk.get("run_id")
+                self.completed_phases = chk.get("completed_phases", [])
+                self.status = chk.get("status", "RUNNING")
                 if self.verbose:
-                    print(f"{Fore.YELLOW}  [Phase {phase_num}] No method found "
-                          f"for '{phase_name}' - skipping.{Style.RESET_ALL}")
-            
-            # Naturally space out phases to avoid triggering burst API rate limits
-            time.sleep(2.0)
+                    config.safe_print(f"{Fore.YELLOW}[Orchestrator] Resuming run '{self.run_id}' | Completed: {self.completed_phases}{Style.RESET_ALL}")
+            else:
+                self.run_id = self._generate_run_id(question)
 
-        # Save Knowledge Graph shared memory to disk
-        if self.graph_memory:
-            self.graph_memory.save_to_json()
+        self.status = "RUNNING"
+        self._print_header(question, active_phase_indices)
 
-        # Save report to disk
-        report  = self.doc["report"] or self.doc["synthesis"]
+        for phase_num in active_phase_indices:
+            phase_name, phase_desc = self.PHASES[phase_num]
+
+            # Skip if phase was already completed in checkpoint
+            if phase_name in self.completed_phases:
+                if self.verbose:
+                    config.safe_print(f"{Fore.CYAN}  [Phase {phase_num}] {phase_name} already completed. Skipping.{Style.RESET_ALL}")
+                continue
+
+            self._print_phase(phase_num, phase_name, phase_desc)
+            phase_method = getattr(self, f"_phase_{phase_name.lower()}", None)
+
+            if phase_method:
+                result, success = phase_method()
+
+                if not success:
+                    # Rate limit or unrecoverable provider failure -> PAUSED_RATE_LIMIT
+                    self.status = "PAUSED_RATE_LIMIT"
+                    self._save_checkpoint(failed_phase=phase_name, error_reason="Provider rate limit or failure")
+                    if self.verbose:
+                        config.safe_print(f"{Fore.RED}\n[Orchestrator] Pipeline PAUSED_RATE_LIMIT at phase '{phase_name}'. Checkpoint saved.{Style.RESET_ALL}")
+                    return f"[Pipeline Paused]: Rate limit or provider failure encountered at phase '{phase_name}'. Run ID: {self.run_id}"
+
+                self.doc[phase_name.lower()] = result
+                self.completed_phases.append(phase_name)
+                self._log_phase(phase_name, result, "SUCCESS")
+                self._save_checkpoint()
+
+        # Phase 8 / Report Assembly
+        report = self.doc.get("report") or self.doc.get("synthesis") or ""
+
+        # Optional Judge Evaluation Gate
+        if self.enable_judge and report:
+            if self.verbose:
+                config.safe_print(f"\n{Fore.CYAN}[Orchestrator] Invoking Judge Agent evaluation...{Style.RESET_ALL}")
+            judge = JudgeAgent(verbose=self.verbose)
+            evidence_context = self.working_memory.get_context(question)
+            eval_result = judge.evaluate(question=question, report_text=report, evidence_context=evidence_context)
+
+            if eval_result.get("verdict") == "REVISE":
+                if self.verbose:
+                    config.safe_print(f"{Fore.YELLOW}[Orchestrator] Judge requested REVISE. Applying targeted report revision...{Style.RESET_ALL}")
+                report = self._phase_report_revision(report, eval_result.get("weaknesses", []))
+
+        # Save final report to disk
         outfile = self._save_report(question, report)
+        self.status = "COMPLETED"
+        self._save_checkpoint()
 
         if self.verbose:
-            print(f"\n{Fore.GREEN}{'='*62}")
-            print(f"  Research complete!")
-            print(f"  Report saved to: {outfile}")
-            print(f"{'='*62}{Style.RESET_ALL}")
+            config.safe_print(f"\n{Fore.GREEN}{'='*62}")
+            config.safe_print(f"  Research Pipeline Complete! Status: {self.status}")
+            config.safe_print(f"  Report saved to: {outfile}")
+            config.safe_print(f"{'='*62}{Style.RESET_ALL}")
 
         return report
 
     # -------------------------------------------------------------
-    # Phase implementations
+    # Phase Executions
     # -------------------------------------------------------------
 
-    def _phase_understand(self) -> str:
-        """
-        Phase 1: Use the LLM to decompose the research question
-        into structured sub-problems before any research begins.
-        """
+    def _phase_understand(self) -> (str, bool):
+        """Phase 1: Planning & Sub-problem decomposition."""
         prompt = (
-            f"You are a research planner. Decompose this research question "
-            f"into 3-5 specific sub-problems that should be investigated:\n\n"
+            f"Decompose this research question into 3-5 specific sub-problems:\n\n"
             f"Question: {self.doc['question']}\n\n"
-            f"For each sub-problem state:\n"
-            f"  - What needs to be found\n"
-            f"  - What type of analysis is required (literature/math/numerical/engineering)\n"
-            f"  - Why it matters for answering the main question\n\n"
-            f"Also list: key variables, relevant physical domains, and expected output type."
+            f"Specify required analysis types (literature/mathematics/numerical/engineering) "
+            f"and key physical parameters."
         )
-        result = self._llm_call(prompt)
-        self.doc["understand"] = result
-        return result
+        messages = [
+            {"role": "system", "content": "You are an expert research planner."},
+            {"role": "user", "content": prompt}
+        ]
+        result = config.call_with_fallback(messages=messages, max_tokens=1000, budget=self.budget, category="understand")
+        if self._is_error(result):
+            return result, False
 
-    def _phase_literature(self) -> str:
-        """Phase 2: Literature scout searches arXiv + Wikipedia."""
+        self.working_memory.ingest(result, phase="UNDERSTAND", source_doc="Planner")
+        return result, True
+
+    def _phase_literature(self) -> (str, bool):
+        """Phase 2: Literature Scout searches arXiv & Wikipedia."""
         agent = self._get_agent("literature")
         agent.reset()
+        task = f"Research Question: {self.doc['question']}\nSearch literature for governing equations, methods, and papers."
+        result = agent.chat_with_tools(task) if agent.tools else agent.chat(task)
+        if self._is_error(result):
+            return result, False
+        return result, True
 
-        task = (
-            f"Research Question: {self.doc['question']}\n\n"
-            f"Research Plan:\n{self.doc['understand']}\n\n"
-            f"Search for papers and background on this topic. "
-            f"Focus on: governing equations, key results, state of the art, "
-            f"and the most relevant authors/papers.\n\n"
-            f"You have the 'research_skills' tool. Use it with 'literature_critique' "
-            f"or 'gap_finder' to map paper lineages, critique claims, and identify novel study topics/gaps."
-        )
-        result = self._run_agent(agent, task)
-        self.doc["literature"] = result
-        return result
-
-    def _phase_mathematics(self) -> str:
+    def _phase_mathematics(self) -> (str, bool):
         """Phase 3: Mathematician derives/verifies key equations."""
         agent = self._get_agent("mathematics")
         agent.reset()
+        context = self.working_memory.get_context("governing equations and math assumptions")
+        task = f"Research Question: {self.doc['question']}\nContext:\n{context}\nDerive governing equations and output in LaTeX."
+        result = agent.chat_with_tools(task) if agent.tools else agent.chat(task)
+        if self._is_error(result):
+            return result, False
+        return result, True
 
-        task = (
-            f"Research Question: {self.doc['question']}\n\n"
-            f"Literature Findings:\n{self.doc['literature']}\n\n"
-            f"Based on the research plan and literature findings:\n"
-            f"  1. Identify the key equations that govern this problem\n"
-            f"  2. Derive or verify the most important ones step by step\n"
-            f"  3. Show any simplifications or approximations used\n"
-            f"  4. Format all results in LaTeX\n\n"
-            f"Use the sympy_math tool to perform all symbolic operations."
-        )
-        result = self._run_agent(agent, task)
-        self.doc["mathematics"] = result
-        return result
-
-    def _phase_computation(self) -> str:
-        """Phase 4: Numerical analyst evaluates key expressions."""
+    def _phase_computation(self) -> (str, bool):
+        """Phase 4: Numerical Analyst performs quantitative calculations."""
         agent = self._get_agent("computation")
         agent.reset()
+        context = self.working_memory.get_context("numerical parameters and equations")
+        task = f"Question: {self.doc['question']}\nContext:\n{context}\nPerform numerical evaluations with engineering units."
+        result = agent.chat_with_tools(task) if agent.tools else agent.chat(task)
+        if self._is_error(result):
+            return result, False
+        return result, True
 
-        context = "\n\n".join(filter(None, [
-            f"Question: {self.doc['question']}",
-            f"Literature:\n{self.doc['literature'][:800]}" if self.doc["literature"] else "",
-            f"Mathematics:\n{self.doc['mathematics'][:800]}" if self.doc["mathematics"] else "",
-        ]))
-
-        task = (
-            f"{context}\n\n"
-            f"Perform all necessary numerical computations:\n"
-            f"  1. Evaluate key expressions to specific numbers with units\n"
-            f"  2. Compute any characteristic values (frequencies, voltages, etc.)\n"
-            f"  3. Solve any numerical systems of equations\n"
-            f"  4. Report all results in appropriate engineering notation\n\n"
-            f"Use the numerical tool for all calculations."
-        )
-        result = self._run_agent(agent, task)
-        self.doc["computation"] = result
-        return result
-
-    def _phase_engineering(self) -> str:
+    def _phase_engineering(self) -> (str, bool):
         """Phase 5: Engineer applies real-world constraints."""
         agent = self._get_agent("engineering")
         agent.reset()
+        context = self.working_memory.get_context("numerical values and physical bounds")
+        task = f"Question: {self.doc['question']}\nContext:\n{context}\nSanity check numbers, physical constraints, and unit consistency."
+        result = agent.chat_with_tools(task) if agent.tools else agent.chat(task)
+        if self._is_error(result):
+            return result, False
+        return result, True
 
-        context = "\n\n".join(filter(None, [
-            f"Question: {self.doc['question']}",
-            f"Literature:\n{self.doc['literature'][:600]}" if self.doc["literature"] else "",
-            f"Numerical Results:\n{self.doc['computation']}" if self.doc["computation"] else "",
-        ]))
-
-        task = (
-            f"{context}\n\n"
-            f"Apply engineering judgment:\n"
-            f"  1. Sanity check all numerical results - are they physically plausible?\n"
-            f"  2. Verify dimensional consistency of equations\n"
-            f"  3. Identify dominant effects vs negligible terms\n"
-            f"  4. Apply real-world constraints (material limits, process variations)\n"
-            f"  5. Convert units as needed for practical engineering use\n\n"
-            f"Flag anything that looks wrong or needs experimental verification."
-        )
-        result = self._run_agent(agent, task)
-        self.doc["engineering"] = result
-        return result
-
-    def _phase_review(self) -> str:
-        """Phase 6: Peer reviewer critiques the full body of work."""
+    def _phase_review(self) -> (str, bool):
+        """Phase 6: Peer Reviewer critiques research findings."""
         agent = self._get_agent("review")
         agent.reset()
+        context = self.working_memory.get_context("all research findings equations and results")
+        task = f"Question: {self.doc['question']}\nContext:\n{context}\nCritique findings for scientific validity and missing evidence."
+        result = agent.chat(task)
+        if self._is_error(result):
+            return result, False
+        return result, True
 
-        all_findings = "\n\n---\n\n".join(filter(None, [
-            f"LITERATURE FINDINGS:\n{self.doc['literature']}",
-            f"MATHEMATICAL DERIVATIONS:\n{self.doc['mathematics']}",
-            f"NUMERICAL RESULTS:\n{self.doc['computation']}",
-            f"ENGINEERING ASSESSMENT:\n{self.doc['engineering']}",
-        ]))
-
-        task = (
-            f"Original research question: {self.doc['question']}\n\n"
-            f"Review the following research findings as a journal peer reviewer:\n\n"
-            f"{all_findings}\n\n"
-            f"Provide a rigorous review covering: scientific validity, completeness, "
-            f"dimensional consistency, missing considerations, and specific improvements.\n\n"
-            f"You have the 'research_skills' tool. Use it with 'literature_critique' "
-            f"(specifically to steel-man the weakest point and generate objections) "
-            f"or 'academic_refinement' (devil's advocate) on these findings."
-        )
-        result = self._run_agent(agent, task)
-        self.doc["review"] = result
-        return result
-
-    def _phase_synthesize(self) -> str:
-        """Phase 7: Synthesizer combines all findings coherently."""
+    def _phase_synthesize(self) -> (str, bool):
+        """Phase 7: Synthesizer combines findings from shared memory."""
         agent = self._get_agent("synthesis")
         agent.reset()
+        context = self.working_memory.get_context(self.doc["question"])
+        task = f"Question: {self.doc['question']}\nContext:\n{context}\nSynthesize all findings into a unified technical summary."
+        result = agent.chat(task)
+        if self._is_error(result):
+            return result, False
+        return result, True
 
-        all_content = "\n\n---\n\n".join(filter(None, [
-            f"QUESTION:\n{self.doc['question']}",
-            f"RESEARCH PLAN:\n{self.doc['understand']}",
-            f"LITERATURE:\n{self.doc['literature']}",
-            f"MATHEMATICS:\n{self.doc['mathematics']}",
-            f"NUMERICS:\n{self.doc['computation']}",
-            f"ENGINEERING:\n{self.doc['engineering']}",
-            f"REVIEW FEEDBACK:\n{self.doc['review']}",
-        ]))
-
-        task = (
-            f"Synthesize all the following research findings into a unified, "
-            f"coherent knowledge summary that fully answers the research question.\n\n"
-            f"{all_content}\n\n"
-            f"Resolve any contradictions. Incorporate review feedback. "
-            f"Make the synthesis self-contained and complete.\n\n"
-            f"You have the 'research_skills' tool. Use it with 'synthesis_drafter' "
-            f"or 'concept_mapper' (specifically to extract the argument chain) to build the synthesis."
+    def _phase_report(self) -> (str, bool):
+        """Phase 8: LongFormGenerator produces section-by-section document."""
+        generator = LongFormGenerator(output_dir=self.output_dir, verbose=self.verbose)
+        result = generator.generate(
+            question=self.doc["question"],
+            mode=self.mode,
+            research_doc=self.doc,
+            working_memory=self.working_memory,
+            long_term_memory=self.long_term_memory,
+            budget=self.budget
         )
-        result = self._run_agent(agent, task)
-        self.doc["synthesis"] = result
-        return result
+        if self._is_error(result):
+            return result, False
+        return result, True
 
-    def _phase_report(self) -> str:
-        """Phase 8: Report writer produces the final document."""
-        agent = self._get_agent("report")
-        agent.reset()
-
-        # Use the synthesis if available, otherwise compile all findings
-        content_source = self.doc["synthesis"] or "\n\n".join(filter(None, [
-            self.doc["literature"],
-            self.doc["mathematics"],
-            self.doc["computation"],
-            self.doc["engineering"],
-        ]))
-
-        task = (
-            f"Write a complete, publication-quality technical report that answers:\n\n"
-            f"RESEARCH QUESTION: {self.doc['question']}\n\n"
-            f"Based on these findings:\n{content_source}\n\n"
-            f"Produce a full report with Abstract, Introduction, Theory/Background, "
-            f"Analysis, Results, Discussion, and Conclusion. "
-            f"Format all equations in LaTeX. Include units on every number. "
-            f"Write in formal academic prose.\n\n"
-            f"You have the 'research_skills' tool. Use it with 'academic_refinement' "
-            f"(for abstract rewrite or brief) or 'synthesis_drafter' (for related works draft) "
-            f"to structure and refine the report sections."
+    def _phase_report_revision(self, current_report: str, weaknesses: List[str]) -> str:
+        """Apply targeted Judge revision feedback to the final report."""
+        feedback_str = "\n- ".join(weaknesses)
+        prompt = (
+            f"Original Report:\n{current_report[:4000]}\n\n"
+            f"Judge Revision Feedback:\n- {feedback_str}\n\n"
+            f"Revise the report addressing these specific weaknesses while maintaining academic structure and LaTeX equations."
         )
-        result = self._run_agent(agent, task)
-        self.doc["report"] = result
-        return result
+        messages = [
+            {"role": "system", "content": "You are an expert scientific report editor."},
+            {"role": "user", "content": prompt}
+        ]
+        revised = config.call_with_fallback(messages=messages, max_tokens=3000)
+        return revised if not self._is_error(revised) else current_report
 
     # -------------------------------------------------------------
-    # Helpers
+    # Checkpointing & State Persistence
+    # -------------------------------------------------------------
+
+    def _generate_run_id(self, question: str) -> str:
+        clean = re.sub(r"[^a-zA-Z0-9]+", "_", question.lower()).strip("_")
+        return f"{clean[:25]}_{int(time.time())}"
+
+    def _save_checkpoint(self, failed_phase: Optional[str] = None, error_reason: Optional[str] = None):
+        """Save durable pipeline checkpoint to disk."""
+        chk_path = os.path.join(self.checkpoint_dir, f"{self.run_id}.json")
+        payload = {
+            "run_id": self.run_id,
+            "question": self.doc["question"],
+            "depth": self.depth,
+            "mode": self.mode,
+            "status": self.status,
+            "completed_phases": self.completed_phases,
+            "failed_phase": failed_phase,
+            "error_reason": error_reason,
+            "budget_state": self.budget.to_dict() if hasattr(self, "budget") and self.budget else None,
+            "timestamp": time.time()
+        }
+        with open(chk_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+
+    def _load_checkpoint(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """Load durable checkpoint from disk."""
+        chk_path = os.path.join(self.checkpoint_dir, f"{run_id}.json")
+        if os.path.exists(chk_path):
+            try:
+                with open(chk_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return None
+
+    def _is_error(self, text: str) -> bool:
+        """Check if output string represents a provider or tool error."""
+        if not text or not isinstance(text, str):
+            return True
+        return any(err in text for err in ["[LLM", "[Groq API Error", "[Gemini API Error", "[Agent error", "[Generation Error]", "429 Too Many Requests"])
+
+    # -------------------------------------------------------------
+    # Helpers & Logging
     # -------------------------------------------------------------
 
     def _get_agent(self, phase_key: str):
-        """
-        Get the agent for a phase. Falls back to a general agent
-        if no specialist was registered for this phase.
-        """
         if phase_key in self._agents:
             return self._agents[phase_key]
-
-        # Fallback: create a minimal general agent
         from agents.base_agent import Agent
-        fallback = Agent(
-            name        = f"Fallback_{phase_key.capitalize()}",
-            role        = f"You are a helpful expert assistant. Complete the task carefully.",
-            temperature = 0.3,
-            verbose     = False,
-        )
-        if self.verbose:
-            print(f"{Fore.YELLOW}  [Warning] No agent for phase '{phase_key}'. "
-                  f"Using fallback.{Style.RESET_ALL}")
-        return fallback
-
-    def _run_agent(self, agent, task: str) -> str:
-        """Run an agent, using tools if it has any."""
-        try:
-            if agent.tools:
-                return agent.chat_with_tools(task)
-            return agent.chat(task)
-        except Exception as e:
-            return f"[Agent error in phase: {e}]"
-
-    def _llm_call(self, prompt: str) -> str:
-        """Direct LLM call for orchestrator-level thinking."""
-        return config.call_llm_api(
-            prompt=prompt,
-            system_instruction="You are a research planning expert.",
-            model=config.DEFAULT_MODEL,
-            temperature=0.4
+        return Agent(
+            name=f"Fallback_{phase_key.capitalize()}",
+            role="You are a helpful expert research assistant.",
+            working_memory=self.working_memory,
+            long_term_memory=self.long_term_memory,
+            verbose=False,
         )
 
     def _save_report(self, question: str, report: str) -> str:
-        """Save the final report to a markdown file."""
-        timestamp  = time.strftime("%Y%m%d_%H%M%S")
-        safe_title = "".join(c if c.isalnum() or c in "-_" else "_"
-                             for c in question[:40])
-        filename   = f"{self.output_dir}/report_{safe_title}_{timestamp}.md"
-
-        full_content = (
-            f"# Research Report\n\n"
-            f"**Question:** {question}\n\n"
-            f"**Generated:** {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            f"**Depth:** {self.depth}\n\n"
-            f"---\n\n"
-            f"{report}\n\n"
-            f"---\n\n"
-            f"## Research Phases\n\n"
-        )
-
-        if self.doc["literature"]:
-            full_content += f"### Literature Findings\n{self.doc['literature']}\n\n"
-        if self.doc["mathematics"]:
-            full_content += f"### Mathematical Derivations\n{self.doc['mathematics']}\n\n"
-        if self.doc["computation"]:
-            full_content += f"### Numerical Results\n{self.doc['computation']}\n\n"
-        if self.doc["engineering"]:
-            full_content += f"### Engineering Assessment\n{self.doc['engineering']}\n\n"
-        if self.doc["review"]:
-            full_content += f"### Peer Review\n{self.doc['review']}\n\n"
-
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        safe_title = "".join(c if c.isalnum() or c in "-_" else "_" for c in question[:40])
+        filename = f"{self.output_dir}/report_{safe_title}_{timestamp}.md"
         with open(filename, "w", encoding="utf-8") as f:
-            f.write(full_content)
-
+            f.write(report)
         return filename
 
-    def _log_phase(self, phase: str, result: str) -> None:
+    def _log_phase(self, phase: str, result: str, status: str = "SUCCESS") -> None:
         self.log.append({
-            "phase":     phase,
+            "phase": phase,
+            "status": status,
             "timestamp": time.strftime("%H:%M:%S"),
-            "length":    len(result),
+            "length": len(result) if result else 0,
         })
-
-    def print_log(self) -> None:
-        """Print a summary of all phases that ran."""
-        print(f"\n{'-'*62}")
-        print(f"Research Orchestrator Log - {len(self.log)} phases")
-        print(f"{'-'*62}")
-        for entry in self.log:
-            print(f"  [OK] {entry['timestamp']} | {entry['phase']:15s} "
-                  f"| {entry['length']} chars output")
-        print(f"{'-'*62}")
 
     def _print_header(self, question: str, phases: list) -> None:
         phase_names = [self.PHASES[p][0] for p in phases]
-        print(f"\n{'='*62}")
-        print(f"{Fore.CYAN}  Research Orchestrator - {self.depth.upper()} mode")
-        print(f"  Phases: {' -> '.join(phase_names)}{Style.RESET_ALL}")
-        print(f"{'-'*62}")
-        print(f"  Question: {question[:80]}")
-        print(f"{'='*62}")
+        config.safe_print(f"\n{'='*62}")
+        config.safe_print(f"{Fore.CYAN}  Research Orchestrator - {self.depth.upper()} mode")
+        config.safe_print(f"  Phases: {' -> '.join(phase_names)}{Style.RESET_ALL}")
+        config.safe_print(f"{'-'*62}")
+        config.safe_print(f"  Question: {question[:80]}")
+        config.safe_print(f"{'='*62}")
 
     def _print_phase(self, num: int, name: str, desc: str) -> None:
-        print(f"\n{Fore.YELLOW}  [{num}/{len(self.DEPTH_PHASES[self.depth])}] "
-              f"{name} - {desc}{Style.RESET_ALL}")
+        config.safe_print(f"\n{Fore.YELLOW}  [{num}/{len(self.DEPTH_PHASES[self.depth])}] {name} - {desc}{Style.RESET_ALL}")

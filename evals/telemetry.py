@@ -21,7 +21,8 @@ init(autoreset=True)
 # Optional LangSmith integration
 LANGSMITH_ACTIVE = False
 try:
-    if os.getenv("LANGCHAIN_TRACING_V2") == "true" or os.getenv("LANGSMITH_API_KEY"):
+    ls_key = os.getenv("LANGSMITH_API_KEY")
+    if ls_key and ls_key.strip():
         from langsmith import Client, traceable
         LANGSMITH_ACTIVE = True
     else:
@@ -63,6 +64,11 @@ class TelemetryLogger:
                     project_name=os.getenv("LANGCHAIN_PROJECT", "MAS-Research-Agent")
                 )
                 self.ls_run.post()
+            except Exception as e:
+                if self.verbose:
+                    print(f"{Fore.YELLOW}[Telemetry] LangSmith post skipped: {e}{Style.RESET_ALL}")
+                self.ls_run = None
+
                 if self.verbose:
                     print(f"{Fore.GREEN}[Telemetry] LangSmith Tracing Active | Project: {os.getenv('LANGCHAIN_PROJECT', 'MAS-Research-Agent')}{Style.RESET_ALL}")
             except Exception as e:
