@@ -496,8 +496,12 @@ function sendFollowupQuestion(question) {
 
 
 // =====================================================================
-// GraphRAG Studio 3D Spatial WebGL Physics Visualizer Engine
+// GraphRAG Studio Dual-Mode (2D Globe & 3D Spatial) Engine
 // =====================================================================
+let currentMode = "2d"; // Default to user's favorite 2D Globe initial theme!
+let visNetworkInstance = null;
+let visNodesDataSet = null;
+let visEdgesDataSet = null;
 let graph3DInstance = null;
 let rawGraphData = { nodes: [], edges: [] };
 let isPhysicsActive = true;
@@ -505,7 +509,17 @@ let hoverNode = null;
 const highlightNodes = new Set();
 const highlightLinks = new Set();
 
-const TYPE_COLOR_MAP = {
+// 2D Vis.js exact initial theme color map
+const TYPE_COLOR_MAP_2D = {
+  CONCEPT: { background: "rgba(129, 140, 248, 0.2)", border: "#818cf8", font: "#c7d2fe" },
+  EQUATION: { background: "rgba(56, 189, 248, 0.2)", border: "#38bdf8", font: "#bae6fd" },
+  METHOD: { background: "rgba(167, 139, 250, 0.2)", border: "#a78bfa", font: "#ddd6fe" },
+  VARIABLE: { background: "rgba(52, 211, 153, 0.2)", border: "#34d399", font: "#a7f3d0" },
+  METRIC: { background: "rgba(251, 191, 36, 0.2)", border: "#fbbf24", font: "#fde68a" },
+  DEFAULT: { background: "rgba(148, 163, 184, 0.2)", border: "#94a3b8", font: "#e2e8f0" }
+};
+
+const TYPE_COLOR_MAP_3D = {
   CONCEPT: "#818cf8",
   EQUATION: "#38bdf8",
   METHOD: "#a78bfa",
@@ -522,6 +536,8 @@ function initGraphStudio() {
   const physicsBtn = document.getElementById("kg-physics-toggle");
   const fitBtn = document.getElementById("kg-fit-btn");
   const inspectorClose = document.getElementById("kg-inspector-close");
+  const btn2D = document.getElementById("kg-mode-2d");
+  const btn3D = document.getElementById("kg-mode-3d");
 
   if (openBtn) {
     openBtn.addEventListener("click", () => {
@@ -542,14 +558,32 @@ function initGraphStudio() {
     });
   }
 
+  if (btn2D && btn3D) {
+    btn2D.addEventListener("click", () => {
+      if (currentMode === "2d") return;
+      currentMode = "2d";
+      btn2D.classList.add("active");
+      btn3D.classList.remove("active");
+      renderGraphForCurrentMode();
+    });
+
+    btn3D.addEventListener("click", () => {
+      if (currentMode === "3d") return;
+      currentMode = "3d";
+      btn3D.classList.add("active");
+      btn2D.classList.remove("active");
+      renderGraphForCurrentMode();
+    });
+  }
+
   if (physicsBtn) {
     physicsBtn.addEventListener("click", () => {
-      if (!graph3DInstance) return;
       isPhysicsActive = !isPhysicsActive;
-      if (isPhysicsActive) {
-        graph3DInstance.resumeAnimation();
-      } else {
-        graph3DInstance.pauseAnimation();
+      if (currentMode === "2d" && visNetworkInstance) {
+        visNetworkInstance.setOptions({ physics: { enabled: isPhysicsActive } });
+      } else if (currentMode === "3d" && graph3DInstance) {
+        if (isPhysicsActive) graph3DInstance.resumeAnimation();
+        else graph3DInstance.pauseAnimation();
       }
       physicsBtn.innerText = isPhysicsActive ? "Pause physics" : "Resume physics";
     });
@@ -557,23 +591,35 @@ function initGraphStudio() {
 
   if (fitBtn) {
     fitBtn.addEventListener("click", () => {
-      if (graph3DInstance) graph3DInstance.zoomToFit(800, 40);
+      if (currentMode === "2d" && visNetworkInstance) {
+        visNetworkInstance.fit({ animation: { duration: 500 } });
+      } else if (currentMode === "3d" && graph3DInstance) {
+        graph3DInstance.zoomToFit(800, 40);
+      }
     });
   }
 
   if (searchInput) {
     searchInput.addEventListener("input", (e) => {
       const q = e.target.value.toLowerCase().trim();
-      if (!graph3DInstance || !rawGraphData.nodes) return;
-
-      if (!q) {
-        graph3DInstance.zoomToFit(800, 40);
-        return;
-      }
-
-      const match = rawGraphData.nodes.find(n => n.id.toLowerCase().includes(q));
-      if (match) {
-        focusNodeIn3D(match);
+      if (currentMode === "2d" && visNodesDataSet) {
+        const updates = [];
+        rawGraphData.nodes.forEach(n => {
+          const matches = !q || n.label.toLowerCase().includes(q);
+          updates.push({
+            id: n.id,
+            opacity: matches ? 1.0 : 0.15,
+            font: { opacity: matches ? 1.0 : 0.2 }
+          });
+        });
+        visNodesDataSet.update(updates);
+      } else if (currentMode === "3d" && graph3DInstance && rawGraphData.nodes) {
+        if (!q) {
+          graph3DInstance.zoomToFit(800, 40);
+          return;
+        }
+        const match = rawGraphData.nodes.find(n => n.id.toLowerCase().includes(q));
+        if (match) focusNodeIn3D(match);
       }
     });
   }
@@ -589,14 +635,23 @@ function initGraphStudio() {
 }
 
 function filterGraphNodes() {
-  if (!graph3DInstance) return;
   const activeTypes = Array.from(document.querySelectorAll(".kg-type-filters input:checked")).map(c => c.value);
 
-  const filteredNodes = rawGraphData.nodes.filter(n => activeTypes.includes(n.type));
-  const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
-  const filteredEdges = rawGraphData.edges.filter(e => filteredNodeIds.has(e.source.id || e.source) && filteredNodeIds.has(e.target.id || e.target));
-
-  graph3DInstance.graphData({ nodes: filteredNodes, links: filteredEdges });
+  if (currentMode === "2d" && visNodesDataSet) {
+    const updates = [];
+    rawGraphData.nodes.forEach(n => {
+      updates.push({
+        id: n.id,
+        hidden: !activeTypes.includes(n.type)
+      });
+    });
+    visNodesDataSet.update(updates);
+  } else if (currentMode === "3d" && graph3DInstance) {
+    const filteredNodes = rawGraphData.nodes.filter(n => activeTypes.includes(n.type));
+    const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
+    const filteredEdges = rawGraphData.edges.filter(e => filteredNodeIds.has(e.source.id || e.source) && filteredNodeIds.has(e.target.id || e.target));
+    graph3DInstance.graphData({ nodes: filteredNodes, links: filteredEdges });
+  }
 }
 
 function loadAndRenderGraph() {
@@ -614,18 +669,124 @@ function loadAndRenderGraph() {
       document.getElementById("kg-modal-node-count").innerText = nodeCount;
       document.getElementById("kg-modal-edge-count").innerText = edgeCount;
 
-      render3DForceGraph(data.nodes, data.edges);
+      renderGraphForCurrentMode();
     })
     .catch(err => {
-      console.error("Failed to load 3D Knowledge Graph:", err);
+      console.error("Failed to load Knowledge Graph:", err);
     });
 }
 
+function renderGraphForCurrentMode() {
+  if (!rawGraphData.nodes) return;
+
+  if (currentMode === "2d") {
+    render2DVisNetwork(rawGraphData.nodes, rawGraphData.edges);
+  } else {
+    render3DForceGraph(rawGraphData.nodes, rawGraphData.edges);
+  }
+}
+
+// ---------------------------------------------------------------------
+// 2D Globe Mode (Vis.js Network Engine - Exact Initial Theme Restored)
+// ---------------------------------------------------------------------
+function render2DVisNetwork(nodes, edges) {
+  const container = document.getElementById("kg-network-canvas");
+  if (!container || typeof vis === "undefined") return;
+
+  container.innerHTML = "";
+  if (graph3DInstance) {
+    graph3DInstance = null;
+  }
+
+  const visNodes = nodes.map(n => {
+    const style = TYPE_COLOR_MAP_2D[n.type] || TYPE_COLOR_MAP_2D.DEFAULT;
+    return {
+      id: n.id,
+      label: n.label,
+      type: n.type,
+      description: n.description,
+      facts: n.facts,
+      shape: "box",
+      margin: 10,
+      color: {
+        background: style.background,
+        border: style.border,
+        highlight: { background: "rgba(56, 189, 248, 0.4)", border: "#38bdf8" }
+      },
+      font: { color: style.font, size: 12, face: "Inter" },
+      borderWidth: 1.5,
+      shadow: { enabled: true, color: "rgba(0,0,0,0.5)", size: 8, x: 2, y: 4 }
+    };
+  });
+
+  const visEdges = edges.map((e, idx) => ({
+    id: `edge_${idx}`,
+    from: e.source,
+    to: e.target,
+    label: e.label,
+    arrows: { to: { enabled: true, scaleFactor: 0.6 } },
+    color: { color: "rgba(148, 163, 184, 0.3)", highlight: "#38bdf8" },
+    font: { color: "#64748b", size: 10, align: "horizontal" },
+    smooth: { type: "continuous" }
+  }));
+
+  visNodesDataSet = new vis.DataSet(visNodes);
+  visEdgesDataSet = new vis.DataSet(visEdges);
+
+  const graphData = { nodes: visNodesDataSet, edges: visEdgesDataSet };
+
+  const options = {
+    physics: {
+      enabled: isPhysicsActive,
+      solver: "forceAtlas2Based",
+      forceAtlas2Based: {
+        gravitationalConstant: -30,
+        centralGravity: 0.012,
+        springLength: 90,
+        springConstant: 0.08
+      },
+      stabilization: { iterations: 150 }
+    },
+    interaction: {
+      hover: true,
+      tooltipDelay: 200,
+      zoomView: true,
+      dragView: true
+    }
+  };
+
+  if (visNetworkInstance) {
+    visNetworkInstance.destroy();
+  }
+
+  visNetworkInstance = new vis.Network(container, graphData, options);
+
+  // Click Node Inspector Handler
+  visNetworkInstance.on("selectNode", (params) => {
+    const nodeId = params.nodes[0];
+    const nodeObj = visNodesDataSet.get(nodeId);
+    if (!nodeObj) return;
+
+    showNodeInspector(nodeObj.label, nodeObj.type, nodeObj.description, nodeId);
+  });
+
+  visNetworkInstance.on("deselectNode", () => {
+    document.getElementById("kg-inspector").style.display = "none";
+  });
+}
+
+// ---------------------------------------------------------------------
+// 3D Spatial Mode (Three.js + 3d-force-graph Engine)
+// ---------------------------------------------------------------------
 function render3DForceGraph(nodes, edges) {
   const container = document.getElementById("kg-network-canvas");
   if (!container || typeof ForceGraph3D === "undefined") return;
 
   container.innerHTML = "";
+  if (visNetworkInstance) {
+    visNetworkInstance.destroy();
+    visNetworkInstance = null;
+  }
 
   const gData = {
     nodes: nodes.map(n => ({
@@ -634,7 +795,7 @@ function render3DForceGraph(nodes, edges) {
       type: n.type,
       description: n.description,
       facts: n.facts,
-      color: TYPE_COLOR_MAP[n.type] || TYPE_COLOR_MAP.DEFAULT,
+      color: TYPE_COLOR_MAP_3D[n.type] || TYPE_COLOR_MAP_3D.DEFAULT,
       val: n.type === "EQUATION" ? 8 : (n.type === "CONCEPT" ? 7 : 5)
     })),
     links: edges.map(e => ({
@@ -656,7 +817,6 @@ function render3DForceGraph(nodes, edges) {
       const group = new THREE.Group();
       const radius = node.val || 6;
       
-      // Core 3D Sphere Mesh with specular highlights
       const sphereGeo = new THREE.SphereGeometry(radius, 24, 24);
       const sphereMat = new THREE.MeshPhongMaterial({
         color: node.color,
@@ -669,7 +829,6 @@ function render3DForceGraph(nodes, edges) {
       const sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
       group.add(sphereMesh);
 
-      // Outer Volumetric Glow Aura
       const auraGeo = new THREE.SphereGeometry(radius * 1.4, 16, 16);
       const auraMat = new THREE.MeshBasicMaterial({
         color: node.color,
@@ -679,7 +838,6 @@ function render3DForceGraph(nodes, edges) {
       const auraMesh = new THREE.Mesh(auraGeo, auraMat);
       group.add(auraMesh);
 
-      // Clean Sprite Label
       if (typeof SpriteText !== "undefined") {
         const sprite = new SpriteText(node.name);
         sprite.color = "#f8fafc";
@@ -719,18 +877,16 @@ function render3DForceGraph(nodes, edges) {
       focusNodeIn3D(node);
     });
 
-  // TIGHT COMPACT PHYSICS: Pulls all 316 nodes into a dense, rich 3D globe volume
   graph3DInstance.d3Force("charge").strength(-35).distanceMax(180);
   graph3DInstance.d3Force("link").distance(32);
 
-  // SMOOTH DAMPED MOUSE CONTROLS: Removes twitchiness for buttery smooth navigation
   const controls = graph3DInstance.controls();
   if (controls) {
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.rotateSpeed = 0.35;
     controls.zoomSpeed = 0.5;
-    controls.autoRotate = false; // Turn off fast auto-rotation so user has full control
+    controls.autoRotate = false;
   }
 }
 
@@ -746,31 +902,29 @@ function focusNodeIn3D(node) {
     1500
   );
 
-  // Populate Side Inspector Panel
+  showNodeInspector(node.name || node.id, node.type, node.description, node.id);
+}
+
+function showNodeInspector(title, type, description, nodeId) {
   const inspector = document.getElementById("kg-inspector");
-  document.getElementById("kg-inspector-title").innerText = node.name || node.id;
-  document.getElementById("kg-inspector-type").innerText = node.type || "CONCEPT";
-  document.getElementById("kg-inspector-type").className = `kg-inspector-type-badge chip-${(node.type || 'concept').toLowerCase()}`;
-  document.getElementById("kg-inspector-desc").innerText = node.description || "No description provided.";
+  document.getElementById("kg-inspector-title").innerText = title;
+  document.getElementById("kg-inspector-type").innerText = type || "CONCEPT";
+  document.getElementById("kg-inspector-type").className = `kg-inspector-type-badge chip-${(type || 'concept').toLowerCase()}`;
+  document.getElementById("kg-inspector-desc").innerText = description || "No description provided.";
 
-  // Find connected links
-  const gData = graph3DInstance.graphData();
-  const connectedLinks = gData.links.filter(l => (l.source.id || l.source) === node.id || (l.target.id || l.target) === node.id);
-
+  const connectedEdges = rawGraphData.edges.filter(e => e.source === nodeId || e.target === nodeId);
   const linksUl = document.getElementById("kg-inspector-links");
   linksUl.innerHTML = "";
 
-  if (connectedLinks.length === 0) {
+  if (connectedEdges.length === 0) {
     linksUl.innerHTML = `<li>No direct connections</li>`;
   } else {
-    connectedLinks.forEach(l => {
-      const srcId = l.source.id || l.source;
-      const tgtId = l.target.id || l.target;
-      const isOutgoing = srcId === node.id;
-      const target = isOutgoing ? tgtId : srcId;
+    connectedEdges.forEach(e => {
+      const isOutgoing = e.source === nodeId;
+      const target = isOutgoing ? e.target : e.source;
       const arrowStr = isOutgoing ? "→" : "←";
       const li = document.createElement("li");
-      li.innerHTML = `<b>${l.label || 'relates_to'}</b> ${arrowStr} <span style="color: var(--text);">${target}</span>`;
+      li.innerHTML = `<b>${e.label || 'relates_to'}</b> ${arrowStr} <span style="color: var(--text);">${target}</span>`;
       linksUl.appendChild(li);
     });
   }

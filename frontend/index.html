@@ -18,6 +18,9 @@
   <!-- Marked.js Markdown Parser -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
+  <!-- Vis.js 2D Network Engine -->
+  <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
   <!-- Three.js & 3D Force-Directed Graph Engine -->
   <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
   <script src="https://unpkg.com/three-spritetext@1.8.2/dist/three-spritetext.min.js"></script>
@@ -209,11 +212,15 @@
           </svg>
           <div>
             <h3>GraphRAG Memory Studio</h3>
-            <p>Live NetworkX MultiDiGraph · 3D Spatial WebGL Physics Visualizer</p>
+            <p>Live NetworkX MultiDiGraph · Dual-Mode Visualizer</p>
           </div>
         </div>
 
         <div class="kg-modal-actions">
+          <div class="kg-mode-switcher">
+            <button id="kg-mode-2d" class="kg-mode-btn active">2D Globe</button>
+            <button id="kg-mode-3d" class="kg-mode-btn">3D Spatial</button>
+          </div>
           <span class="kg-stat-badge">Nodes · <b id="kg-modal-node-count">0</b></span>
           <span class="kg-stat-badge">Edges · <b id="kg-modal-edge-count">0</b></span>
           <button id="kg-physics-toggle" class="kg-action-btn">Pause physics</button>
@@ -261,6 +268,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
