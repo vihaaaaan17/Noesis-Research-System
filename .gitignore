@@ -32,6 +32,7 @@ evals/eval_kg.json
 # Node & frontend build files
 node_modules/
 frontend/node_modules/
+*.png
 
 # Local databases & checkpoints
 chroma_db/

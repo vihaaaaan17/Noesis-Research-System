@@ -62,43 +62,6 @@ def health_check():
     }
 
 
-@app.get("/api/graph")
-def get_knowledge_graph():
-    """Return the active Knowledge Graph state via clean memory interface."""
-    wm = WorkingMemory(verbose=False)
-    kg = wm.graph_memory
-    val_stats = kg.validate()
-
-    nodes = [
-        {
-            "id": n,
-            "label": n,
-            "type": data.get("entity_type", "CONCEPT"),
-            "description": data.get("description", ""),
-            "key_facts": data.get("key_facts", []),
-            "mentions": data.get("mention_count", 1)
-        }
-        for n, data in kg.graph.nodes(data=True)
-    ]
-
-    edges = [
-        {
-            "source": s,
-            "target": t,
-            "predicate": data.get("predicate", "related_to"),
-            "doc": data.get("source_document_id", "system")
-        }
-        for s, t, data in kg.graph.edges(data=True)
-    ]
-
-    return {
-        "summary": val_stats,
-        "nodes": nodes,
-        "edges": edges,
-        "alias_map": kg.alias_map
-    }
-
-
 REPORTS_DIR = os.path.abspath("reports")
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
@@ -297,6 +260,59 @@ def chat_followup(req: FollowupRequest):
         max_tokens=2500
     )
     return {"answer": answer}
+
+
+@app.get("/api/graph")
+def get_knowledge_graph():
+    """Return complete Knowledge Graph nodes and edges for live visualizer."""
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    kg_path = os.path.join(root_dir, "reports", "research_kg.json")
+    data = {}
+    if os.path.exists(kg_path):
+        try:
+            with open(kg_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            pass
+
+    if not data:
+        wm = WorkingMemory(verbose=False)
+        data = wm.graph_memory.to_dict()
+
+    nodes_raw = data.get("nodes", [])
+    edges_raw = data.get("edges", []) or data.get("links", [])
+
+    nodes = []
+    node_set = set()
+    for n in nodes_raw:
+        nid = str(n.get("name") or n.get("id") or "")
+        if nid and nid not in node_set:
+            node_set.add(nid)
+            nodes.append({
+                "id": nid,
+                "label": nid,
+                "type": str(n.get("entity_type") or n.get("type") or "CONCEPT").upper(),
+                "description": n.get("description", ""),
+                "facts": n.get("key_facts") or n.get("facts") or []
+            })
+
+    edges = []
+    for e in edges_raw:
+        s = str(e.get("source") or "")
+        t = str(e.get("target") or "")
+        if s and t:
+            edges.append({
+                "source": s,
+                "target": t,
+                "label": str(e.get("predicate") or e.get("relation") or "relates_to")
+            })
+
+    return {
+        "num_nodes": len(nodes),
+        "num_edges": len(edges),
+        "nodes": nodes,
+        "edges": edges
+    }
 
 
 # Mount static frontend directory

@@ -18,6 +18,9 @@
   <!-- Marked.js Markdown Parser -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
+  <!-- Vis.js Network Engine for Knowledge Graph Visualization -->
+  <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="lab-bg">
@@ -99,6 +102,17 @@
         </div>
 
         <div class="header-kg">
+          <button id="open-kg-btn" class="kg-view-btn">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="6" cy="6" r="3"></circle>
+              <circle cx="18" cy="6" r="3"></circle>
+              <circle cx="12" cy="18" r="3"></circle>
+              <line x1="8.5" y1="7.5" x2="15.5" y2="7.5"></line>
+              <line x1="7.5" y1="8.5" x2="10.5" y2="15.5"></line>
+              <line x1="16.5" y1="8.5" x2="13.5" y2="15.5"></line>
+            </svg>
+            GraphRAG Visualizer
+          </button>
           <span class="kg-pill">KG nodes · <b id="kg-nodes">0</b></span>
           <span class="kg-pill">KG edges · <b id="kg-edges">0</b></span>
         </div>
@@ -176,6 +190,75 @@
 
   </div>
 
-  <script src="app.js"></script>
+  <!-- GraphRAG Studio Modal Overlay -->
+  <div id="kg-modal" class="kg-modal-overlay" style="display: none;">
+    <div class="kg-modal-content">
+      
+      <!-- Modal Header -->
+      <div class="kg-modal-header">
+        <div class="kg-modal-title">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="6" cy="6" r="3"></circle>
+            <circle cx="18" cy="6" r="3"></circle>
+            <circle cx="12" cy="18" r="3"></circle>
+            <line x1="8.5" y1="7.5" x2="15.5" y2="7.5"></line>
+            <line x1="7.5" y1="8.5" x2="10.5" y2="15.5"></line>
+            <line x1="16.5" y1="8.5" x2="13.5" y2="15.5"></line>
+          </svg>
+          <div>
+            <h3>GraphRAG Memory Studio</h3>
+            <p>Live NetworkX MultiDiGraph · 2D Physics Visualizer</p>
+          </div>
+        </div>
+
+        <div class="kg-modal-actions">
+          <span class="kg-stat-badge">Nodes · <b id="kg-modal-node-count">0</b></span>
+          <span class="kg-stat-badge">Edges · <b id="kg-modal-edge-count">0</b></span>
+          <button id="kg-physics-toggle" class="kg-action-btn">Pause physics</button>
+          <button id="kg-fit-btn" class="kg-action-btn">Fit view</button>
+          <button id="close-kg-btn" class="kg-close-btn">&times;</button>
+        </div>
+      </div>
+
+      <!-- Controls & Legend Bar -->
+      <div class="kg-toolbar">
+        <div class="kg-search-box">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input type="text" id="kg-search-input" placeholder="Search entity node..." />
+        </div>
+
+        <div class="kg-type-filters">
+          <label class="kg-chip chip-concept active"><input type="checkbox" checked value="CONCEPT"> CONCEPT</label>
+          <label class="kg-chip chip-equation active"><input type="checkbox" checked value="EQUATION"> EQUATION</label>
+          <label class="kg-chip chip-method active"><input type="checkbox" checked value="METHOD"> METHOD</label>
+          <label class="kg-chip chip-variable active"><input type="checkbox" checked value="VARIABLE"> VARIABLE</label>
+          <label class="kg-chip chip-metric active"><input type="checkbox" checked value="METRIC"> METRIC</label>
+        </div>
+      </div>
+
+      <!-- Main Canvas & Inspector Layout -->
+      <div class="kg-canvas-container">
+        <div id="kg-network-canvas" class="kg-network-canvas"></div>
+
+        <!-- Node Inspector Side Panel -->
+        <div id="kg-inspector" class="kg-inspector" style="display: none;">
+          <div class="kg-inspector-header">
+            <span id="kg-inspector-type" class="kg-inspector-type-badge">CONCEPT</span>
+            <button id="kg-inspector-close" class="kg-inspector-close">&times;</button>
+          </div>
+          <h4 id="kg-inspector-title">Entity Name</h4>
+          <p id="kg-inspector-desc" class="kg-inspector-desc">Description of entity</p>
+
+          <div class="kg-inspector-section">
+            <h5>Relationships</h5>
+            <ul id="kg-inspector-links" class="kg-inspector-links"></ul>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="app.js?v=2"></script>
 </body>
 </html>

@@ -493,3 +493,247 @@ function sendFollowupQuestion(question) {
     contentElem.innerText = `Error answering follow-up: ${err.message}`;
   });
 }
+
+
+// =====================================================================
+// GraphRAG Studio Visualizer Engine
+// =====================================================================
+let visNetworkInstance = null;
+let visNodesDataSet = null;
+let visEdgesDataSet = null;
+let rawGraphData = { nodes: [], edges: [] };
+let isPhysicsActive = true;
+
+const TYPE_COLOR_MAP = {
+  CONCEPT: { background: "rgba(129, 140, 248, 0.2)", border: "#818cf8", font: "#c7d2fe" },
+  EQUATION: { background: "rgba(56, 189, 248, 0.2)", border: "#38bdf8", font: "#bae6fd" },
+  METHOD: { background: "rgba(167, 139, 250, 0.2)", border: "#a78bfa", font: "#ddd6fe" },
+  VARIABLE: { background: "rgba(52, 211, 153, 0.2)", border: "#34d399", font: "#a7f3d0" },
+  METRIC: { background: "rgba(251, 191, 36, 0.2)", border: "#fbbf24", font: "#fde68a" },
+  DEFAULT: { background: "rgba(148, 163, 184, 0.2)", border: "#94a3b8", font: "#e2e8f0" }
+};
+
+function initGraphStudio() {
+  const openBtn = document.getElementById("open-kg-btn");
+  const closeBtn = document.getElementById("close-kg-btn");
+  const modal = document.getElementById("kg-modal");
+  const searchInput = document.getElementById("kg-search-input");
+  const physicsBtn = document.getElementById("kg-physics-toggle");
+  const fitBtn = document.getElementById("kg-fit-btn");
+  const inspectorClose = document.getElementById("kg-inspector-close");
+
+  if (openBtn) {
+    openBtn.addEventListener("click", () => {
+      modal.style.display = "flex";
+      loadAndRenderGraph();
+    });
+  }
+
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => {
+      modal.style.display = "none";
+    });
+  }
+
+  if (inspectorClose) {
+    inspectorClose.addEventListener("click", () => {
+      document.getElementById("kg-inspector").style.display = "none";
+    });
+  }
+
+  if (physicsBtn) {
+    physicsBtn.addEventListener("click", () => {
+      if (!visNetworkInstance) return;
+      isPhysicsActive = !isPhysicsActive;
+      visNetworkInstance.setOptions({ physics: { enabled: isPhysicsActive } });
+      physicsBtn.innerText = isPhysicsActive ? "Pause physics" : "Resume physics";
+    });
+  }
+
+  if (fitBtn) {
+    fitBtn.addEventListener("click", () => {
+      if (visNetworkInstance) visNetworkInstance.fit({ animation: { duration: 500 } });
+    });
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener("input", (e) => {
+      const q = e.target.value.toLowerCase().trim();
+      if (!visNodesDataSet) return;
+
+      const updates = [];
+      rawGraphData.nodes.forEach(n => {
+        const matches = !q || n.label.toLowerCase().includes(q);
+        updates.push({
+          id: n.id,
+          opacity: matches ? 1.0 : 0.15,
+          font: { opacity: matches ? 1.0 : 0.2 }
+        });
+      });
+      visNodesDataSet.update(updates);
+    });
+  }
+
+  // Type filter checkboxes
+  const filterChips = document.querySelectorAll(".kg-type-filters input");
+  filterChips.forEach(chip => {
+    chip.addEventListener("change", () => {
+      chip.parentElement.classList.toggle("active", chip.checked);
+      filterGraphNodes();
+    });
+  });
+}
+
+function filterGraphNodes() {
+  if (!visNodesDataSet) return;
+  const activeTypes = Array.from(document.querySelectorAll(".kg-type-filters input:checked")).map(c => c.value);
+
+  const updates = [];
+  rawGraphData.nodes.forEach(n => {
+    const isVisible = activeTypes.includes(n.type);
+    updates.push({
+      id: n.id,
+      hidden: !isVisible
+    });
+  });
+  visNodesDataSet.update(updates);
+}
+
+function loadAndRenderGraph() {
+  fetch("/api/graph")
+    .then(r => r.json())
+    .then(data => {
+      rawGraphData = data;
+
+      // Update counters
+      const nodeCount = data.num_nodes !== undefined ? data.num_nodes : data.nodes.length;
+      const edgeCount = data.num_edges !== undefined ? data.num_edges : data.edges.length;
+
+      document.getElementById("kg-nodes").innerText = nodeCount;
+      document.getElementById("kg-edges").innerText = edgeCount;
+      document.getElementById("kg-modal-node-count").innerText = nodeCount;
+      document.getElementById("kg-modal-edge-count").innerText = edgeCount;
+
+      renderVisNetwork(data.nodes, data.edges);
+    })
+    .catch(err => {
+      console.error("Failed to load Knowledge Graph:", err);
+    });
+}
+
+function renderVisNetwork(nodes, edges) {
+  const container = document.getElementById("kg-network-canvas");
+  if (!container || typeof vis === "undefined") return;
+
+  const visNodes = nodes.map(n => {
+    const style = TYPE_COLOR_MAP[n.type] || TYPE_COLOR_MAP.DEFAULT;
+    return {
+      id: n.id,
+      label: n.label,
+      type: n.type,
+      description: n.description,
+      facts: n.facts,
+      shape: "box",
+      margin: 10,
+      color: {
+        background: style.background,
+        border: style.border,
+        highlight: { background: "rgba(56, 189, 248, 0.4)", border: "#38bdf8" }
+      },
+      font: { color: style.font, size: 12, face: "Inter" },
+      borderWidth: 1.5,
+      shadow: { enabled: true, color: "rgba(0,0,0,0.5)", size: 8, x: 2, y: 4 }
+    };
+  });
+
+  const visEdges = edges.map((e, idx) => ({
+    id: `edge_${idx}`,
+    from: e.source,
+    to: e.target,
+    label: e.label,
+    arrows: { to: { enabled: true, scaleFactor: 0.6 } },
+    color: { color: "rgba(148, 163, 184, 0.3)", highlight: "#38bdf8" },
+    font: { color: "#64748b", size: 10, align: "horizontal" },
+    smooth: { type: "continuous" }
+  }));
+
+  visNodesDataSet = new vis.DataSet(visNodes);
+  visEdgesDataSet = new vis.DataSet(visEdges);
+
+  const graphData = { nodes: visNodesDataSet, edges: visEdgesDataSet };
+
+  const options = {
+    physics: {
+      enabled: isPhysicsActive,
+      solver: "forceAtlas2Based",
+      forceAtlas2Based: {
+        gravitationalConstant: -35,
+        centralGravity: 0.01,
+        springLength: 100,
+        springConstant: 0.08
+      },
+      stabilization: { iterations: 150 }
+    },
+    interaction: {
+      hover: true,
+      tooltipDelay: 200,
+      zoomView: true,
+      dragView: true
+    }
+  };
+
+  if (visNetworkInstance) {
+    visNetworkInstance.destroy();
+  }
+
+  visNetworkInstance = new vis.Network(container, graphData, options);
+
+  // Click Node Inspector Handler
+  visNetworkInstance.on("selectNode", (params) => {
+    const nodeId = params.nodes[0];
+    const nodeObj = visNodesDataSet.get(nodeId);
+    if (!nodeObj) return;
+
+    const inspector = document.getElementById("kg-inspector");
+    document.getElementById("kg-inspector-title").innerText = nodeObj.label;
+    document.getElementById("kg-inspector-type").innerText = nodeObj.type;
+    document.getElementById("kg-inspector-type").className = `kg-inspector-type-badge chip-${nodeObj.type.toLowerCase()}`;
+    document.getElementById("kg-inspector-desc").innerText = nodeObj.description || "No description provided.";
+
+    // Connected Edges
+    const connectedEdges = visEdgesDataSet.get().filter(e => e.from === nodeId || e.to === nodeId);
+    const linksUl = document.getElementById("kg-inspector-links");
+    linksUl.innerHTML = "";
+
+    if (connectedEdges.length === 0) {
+      linksUl.innerHTML = `<li>No direct connections</li>`;
+    } else {
+      connectedEdges.forEach(e => {
+        const isOutgoing = e.from === nodeId;
+        const target = isOutgoing ? e.to : e.from;
+        const arrowStr = isOutgoing ? "→" : "←";
+        const li = document.createElement("li");
+        li.innerHTML = `<b>${e.label}</b> ${arrowStr} <span style="color: var(--text);">${target}</span>`;
+        linksUl.appendChild(li);
+      });
+    }
+
+    inspector.style.display = "block";
+  });
+
+  visNetworkInstance.on("deselectNode", () => {
+    document.getElementById("kg-inspector").style.display = "none";
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  initGraphStudio();
+  fetch("/api/graph")
+    .then(r => r.json())
+    .then(d => {
+      if (d && d.num_nodes !== undefined) {
+        document.getElementById("kg-nodes").innerText = d.num_nodes;
+        document.getElementById("kg-edges").innerText = d.num_edges;
+      }
+    }).catch(() => {});
+});
