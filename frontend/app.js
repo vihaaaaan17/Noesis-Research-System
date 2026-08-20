@@ -635,7 +635,7 @@ function render3DForceGraph(nodes, edges) {
       description: n.description,
       facts: n.facts,
       color: TYPE_COLOR_MAP[n.type] || TYPE_COLOR_MAP.DEFAULT,
-      val: n.type === "EQUATION" ? 5 : 3
+      val: n.type === "EQUATION" ? 8 : (n.type === "CONCEPT" ? 7 : 5)
     })),
     links: edges.map(e => ({
       source: e.source,
@@ -648,40 +648,57 @@ function render3DForceGraph(nodes, edges) {
     .graphData(gData)
     .backgroundColor("#0b0c0e")
     .nodeColor(node => node.color)
-    .nodeRelSize(4)
-    .nodeResolution(16)
+    .nodeRelSize(6)
+    .nodeResolution(24)
     .nodeVal("val")
-    .nodeOpacity(0.9)
+    .nodeOpacity(0.95)
     .nodeThreeObject(node => {
       const group = new THREE.Group();
+      const radius = node.val || 6;
       
-      // 3D Sphere geometry
-      const sphereGeo = new THREE.SphereGeometry(node.val || 3, 16, 16);
-      const sphereMat = new THREE.MeshLambertMaterial({
+      // Core 3D Sphere Mesh with specular highlights
+      const sphereGeo = new THREE.SphereGeometry(radius, 24, 24);
+      const sphereMat = new THREE.MeshPhongMaterial({
         color: node.color,
+        emissive: node.color,
+        emissiveIntensity: 0.35,
+        shininess: 90,
         transparent: true,
-        opacity: 0.85
+        opacity: 0.95
       });
       const sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
       group.add(sphereMesh);
 
-      // Sprite text label floating in 3D
+      // Outer Volumetric Glow Aura
+      const auraGeo = new THREE.SphereGeometry(radius * 1.4, 16, 16);
+      const auraMat = new THREE.MeshBasicMaterial({
+        color: node.color,
+        transparent: true,
+        opacity: 0.2
+      });
+      const auraMesh = new THREE.Mesh(auraGeo, auraMat);
+      group.add(auraMesh);
+
+      // Clean Sprite Label
       if (typeof SpriteText !== "undefined") {
         const sprite = new SpriteText(node.name);
-        sprite.color = node.color;
-        sprite.textHeight = 3.5;
+        sprite.color = "#f8fafc";
+        sprite.backgroundColor = "rgba(15, 17, 21, 0.7)";
+        sprite.padding = [2, 4];
+        sprite.borderRadius = 3;
+        sprite.textHeight = 3.2;
         sprite.fontFace = "Inter";
-        sprite.position.set(0, (node.val || 3) + 4, 0);
+        sprite.position.set(0, radius + 5, 0);
         group.add(sprite);
       }
 
       return group;
     })
-    .linkWidth(link => (highlightLinks.has(link) ? 2 : 0.8))
-    .linkColor(link => (highlightLinks.has(link) ? "#38bdf8" : "rgba(148, 163, 184, 0.25)"))
-    .linkDirectionalParticles(link => (highlightLinks.has(link) ? 4 : 2))
-    .linkDirectionalParticleWidth(link => (highlightLinks.has(link) ? 3 : 1.5))
-    .linkDirectionalParticleSpeed(0.005)
+    .linkWidth(link => (highlightLinks.has(link) ? 2.5 : 1.2))
+    .linkColor(link => (highlightLinks.has(link) ? "#38bdf8" : "rgba(129, 140, 248, 0.35)"))
+    .linkDirectionalParticles(link => (highlightLinks.has(link) ? 5 : 3))
+    .linkDirectionalParticleWidth(link => (highlightLinks.has(link) ? 3.5 : 2.0))
+    .linkDirectionalParticleSpeed(0.003)
     .onNodeHover(node => {
       highlightNodes.clear();
       highlightLinks.clear();
@@ -702,25 +719,31 @@ function render3DForceGraph(nodes, edges) {
       focusNodeIn3D(node);
     });
 
-  // Configure wobbly 3D spring forces
-  graph3DInstance.d3Force("charge").strength(-120);
-  graph3DInstance.d3Force("link").distance(60);
+  // TIGHT COMPACT PHYSICS: Pulls all 316 nodes into a dense, rich 3D globe volume
+  graph3DInstance.d3Force("charge").strength(-35).distanceMax(180);
+  graph3DInstance.d3Force("link").distance(32);
 
-  // Gentle continuous 3D rotation
-  graph3DInstance.controls().autoRotate = true;
-  graph3DInstance.controls().autoRotateSpeed = 0.5;
+  // SMOOTH DAMPED MOUSE CONTROLS: Removes twitchiness for buttery smooth navigation
+  const controls = graph3DInstance.controls();
+  if (controls) {
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.rotateSpeed = 0.35;
+    controls.zoomSpeed = 0.5;
+    controls.autoRotate = false; // Turn off fast auto-rotation so user has full control
+  }
 }
 
 function focusNodeIn3D(node) {
   if (!graph3DInstance || !node) return;
 
-  const distance = 80;
+  const distance = 90;
   const distRatio = 1 + distance / Math.hypot(node.x || 1, node.y || 1, node.z || 1);
 
   graph3DInstance.cameraPosition(
     { x: (node.x || 0) * distRatio, y: (node.y || 0) * distRatio, z: (node.z || 0) * distRatio },
     { x: node.x || 0, y: node.y || 0, z: node.z || 0 },
-    1200
+    1500
   );
 
   // Populate Side Inspector Panel
