@@ -18,8 +18,10 @@
   <!-- Marked.js Markdown Parser -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-  <!-- Vis.js Network Engine for Knowledge Graph Visualization -->
-  <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <!-- Three.js & 3D Force-Directed Graph Engine -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three-spritetext@1.8.2/dist/three-spritetext.min.js"></script>
+  <script src="https://unpkg.com/3d-force-graph@1.73.3/dist/3d-force-graph.min.js"></script>
 
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -207,7 +209,7 @@
           </svg>
           <div>
             <h3>GraphRAG Memory Studio</h3>
-            <p>Live NetworkX MultiDiGraph · 2D Physics Visualizer</p>
+            <p>Live NetworkX MultiDiGraph · 3D Spatial WebGL Physics Visualizer</p>
           </div>
         </div>
 
@@ -259,6 +261,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=2"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>
