@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Noesis - Autonomous Multi-Agent Research System</title>
   
-  <!-- Google Fonts: Inter -->
+  <!-- Google Fonts: Inter, Instrument Serif, Newsreader (Claude-style elegant typography) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   
   <!-- KaTeX LaTeX Renderer CDN -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
@@ -127,8 +127,7 @@
       <div id="chat-viewport" class="chat-viewport">
         <div id="chat-messages" class="chat-messages">
           <div class="welcome-screen" id="welcome-screen">
-            <div class="brand-badge">Autonomous multi-agent research system</div>
-            <h1>Noesis</h1>
+            <h1 class="claude-serif-title">Noesis</h1>
             <p>Enter a research question or request a technical derivation to trigger the multi-agent execution pipeline.</p>
 
             <div class="command-chips">
@@ -180,14 +179,71 @@
           </div>
         </div>
 
-        <div class="input-box">
-          <textarea id="query-input" rows="1" placeholder="Ask Noesis a research question or type '/' for commands…"></textarea>
-          <button id="send-btn" class="send-btn" title="Run Research">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="22" y1="2" x2="11" y2="13"></line>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-            </svg>
-          </button>
+        <!-- Rich Prompt Input Box -->
+        <div class="prompt-box-wrapper">
+          <!-- File Preview Row -->
+          <div id="file-preview-bar" class="file-preview-bar" style="display: none;"></div>
+
+          <div class="prompt-textarea-row">
+            <textarea id="query-input" rows="1" placeholder="Type your message here or type '/' for commands…"></textarea>
+          </div>
+
+          <div class="prompt-actions-bar">
+            <!-- Left Action Group: Attachment & Mode Pills -->
+            <div class="prompt-actions-left">
+              <!-- Upload Attachment Button -->
+              <button type="button" id="upload-btn" class="prompt-icon-btn" title="Upload image or file">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                </svg>
+              </button>
+              <input type="file" id="file-upload-input" class="hidden-file-input" accept="image/*,.pdf,.txt" style="display: none;">
+
+              <div class="pill-group">
+                <!-- Search Pill -->
+                <button type="button" id="pill-search" class="prompt-mode-pill" onclick="togglePromptMode('search')">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                  </svg>
+                  <span>Search</span>
+                </button>
+
+                <div class="custom-divider"></div>
+
+                <!-- Think Pill -->
+                <button type="button" id="pill-think" class="prompt-mode-pill" onclick="togglePromptMode('think')">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04z"></path>
+                    <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04z"></path>
+                  </svg>
+                  <span>Think</span>
+                </button>
+
+                <div class="custom-divider"></div>
+
+                <!-- Canvas Pill -->
+                <button type="button" id="pill-canvas" class="prompt-mode-pill" onclick="togglePromptMode('canvas')">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"></path>
+                    <polyline points="8 10 12 14 16 10"></polyline>
+                  </svg>
+                  <span>Canvas</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Right Action Group: Send / Action Button -->
+            <div class="prompt-actions-right">
+              <button id="send-btn" class="send-btn" title="Send message">
+                <svg id="send-btn-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="19" x2="12" y2="5"></line>
+                  <polyline points="5 12 12 5 19 12"></polyline>
+                </svg>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -268,6 +324,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

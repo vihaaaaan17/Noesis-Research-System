@@ -1,3 +1,9 @@
+# Web Server & API
+fastapi
+uvicorn
+pydantic
+networkx
+
 # Core
 google-generativeai==0.8.3
 python-dotenv==1.0.0

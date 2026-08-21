@@ -6,7 +6,7 @@ Powered by **Groq High-Throughput Llama-3.3-70B / Llama-3.1-8B-Instant** with **
 
 ---
 
-## 📐 System Architecture Diagram
+## System Architecture Diagram
 
 ```mermaid
 flowchart TD
@@ -47,7 +47,7 @@ flowchart TD
 
 ---
 
-## 🧠 Memory Architecture (Working Memory + Long-Term Memory)
+## Memory Architecture (Working Memory + Long-Term Memory)
 
 MAS implements a decoupled **Two-Memory Architecture** coordinated by `ContextBuilder` (`memory/context_builder.py`):
 
@@ -65,7 +65,7 @@ MAS implements a decoupled **Two-Memory Architecture** coordinated by `ContextBu
 
 ---
 
-## 🛡️ Centralized Budget & API Resilience Architecture
+## Centralized Budget & API Resilience Architecture
 
 To prevent API cost overrun, token rate limit spikes, and retry storms, MAS enforces a centralized execution and budget control system:
 
@@ -88,7 +88,7 @@ To prevent API cost overrun, token rate limit spikes, and retry storms, MAS enfo
 
 ---
 
-## 🏛️ The 8-Phase Research Pipeline
+## The 8-Phase Research Pipeline
 
 The `ResearchOrchestrator` (`orchestrator/research_orchestrator.py`) drives specialist agents through a structured, checkpointed workflow:
 

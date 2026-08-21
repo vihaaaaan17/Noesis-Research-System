@@ -12,6 +12,80 @@ let showInternalActivity = false;
 let activeChatId = null;
 let chatSessions = {};
 let activeReportContext = "";
+let currentPromptMode = null;
+let uploadedFiles = [];
+
+window.togglePromptMode = function(mode) {
+  const queryInput = document.getElementById("query-input");
+  const pills = {
+    search: document.getElementById("pill-search"),
+    think: document.getElementById("pill-think"),
+    canvas: document.getElementById("pill-canvas")
+  };
+  
+  if (currentPromptMode === mode) {
+    currentPromptMode = null;
+  } else {
+    currentPromptMode = mode;
+  }
+
+  pills.search?.classList.remove("active-search");
+  pills.think?.classList.remove("active-think");
+  pills.canvas?.classList.remove("active-canvas");
+
+  if (currentPromptMode === "search") {
+    pills.search?.classList.add("active-search");
+    if (queryInput) queryInput.placeholder = "Search the web...";
+  } else if (currentPromptMode === "think") {
+    pills.think?.classList.add("active-think");
+    if (queryInput) queryInput.placeholder = "Think deeply...";
+  } else if (currentPromptMode === "canvas") {
+    pills.canvas?.classList.add("active-canvas");
+    if (queryInput) queryInput.placeholder = "Create on canvas...";
+  } else {
+    if (queryInput) queryInput.placeholder = "Type your message here or type '/' for commands…";
+  }
+};
+
+function initFileUpload() {
+  const uploadBtn = document.getElementById("upload-btn");
+  const fileInput = document.getElementById("file-upload-input");
+
+  if (uploadBtn && fileInput) {
+    uploadBtn.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", (e) => {
+      if (e.target.files && e.target.files[0]) {
+        uploadedFiles.push(e.target.files[0]);
+        renderFilePreviews();
+        fileInput.value = "";
+      }
+    });
+  }
+}
+
+function renderFilePreviews() {
+  const previewBar = document.getElementById("file-preview-bar");
+  if (!previewBar) return;
+
+  if (uploadedFiles.length === 0) {
+    previewBar.style.display = "none";
+    previewBar.innerHTML = "";
+    return;
+  }
+
+  previewBar.style.display = "flex";
+  previewBar.innerHTML = uploadedFiles.map((file, idx) => `
+    <div class="file-preview-item">
+      ${file.type.startsWith("image/") ? `<img src="${URL.createObjectURL(file)}" alt="Preview">` : `<div style="padding:8px;font-size:11px;color:#fff;">${file.name}</div>`}
+      <button class="file-preview-remove" onclick="removeUploadedFile(${idx})">✕</button>
+    </div>
+  `).join("");
+}
+
+window.removeUploadedFile = function(idx) {
+  uploadedFiles.splice(idx, 1);
+  renderFilePreviews();
+};
 
 function insertCommand(cmd) {
   const queryInput = document.getElementById("query-input");
@@ -26,6 +100,7 @@ function insertCommand(cmd) {
 // Initialize Chat App
 document.addEventListener("DOMContentLoaded", () => {
   loadSavedChats();
+  initFileUpload();
 
   // Mode Selection buttons
   document.querySelectorAll(".mode-btn").forEach(btn => {
@@ -156,8 +231,7 @@ function startNewChat() {
   const container = document.getElementById("chat-messages");
   container.innerHTML = `
     <div class="welcome-screen" id="welcome-screen">
-      <div class="brand-badge">Autonomous multi-agent research system</div>
-      <h1>Noesis</h1>
+      <h1 class="claude-serif-title">Noesis</h1>
       <p>Enter a research question or request a technical derivation to trigger the multi-agent execution pipeline.</p>
       <div class="command-chips">
         <button class="cmd-pill-btn" onclick="insertCommand('/literature ')">
