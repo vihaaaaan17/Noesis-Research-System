@@ -109,7 +109,7 @@ The `ResearchOrchestrator` (`orchestrator/research_orchestrator.py`) drives spec
 
 ---
 
-## 📄 Generalized Long-Form Generation Engine (`core/report_generator.py`)
+## Generalized Long-Form Generation Engine (`core/report_generator.py`)
 
 The generation engine supports 5 flexible document modes:
 - **`answer`**: Direct single answer.
@@ -120,7 +120,7 @@ The generation engine supports 5 flexible document modes:
 
 ---
 
-## 🛠️ Project Structure
+## Project Structure
 
 ```text
 MAS/
@@ -161,7 +161,7 @@ MAS/
 
 ---
 
-## 💻 Getting Started
+## Getting Started
 
 ### 1. Installation
 ```bash
@@ -191,6 +191,6 @@ python inspect_run.py
 
 ---
 
-## 📜 License
+## License
 
 Distributed under the MIT License.

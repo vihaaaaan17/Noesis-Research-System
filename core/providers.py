@@ -171,13 +171,23 @@ class GroqProvider(LLMProvider):
             "Content-Type": "application/json"
         }
 
-        # Up to 3 automatic retries with parsed rate limit wait
-        max_attempts = 3
-        current_model = groq_model
+        # Candidate models for Groq execution (automatically cascades if a model returns 404)
+        model_candidates = [
+            groq_model,
+            "qwen/qwen3.6-27b",
+            "groq/compound",
+            "openai/gpt-oss-120b",
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant"
+        ]
+        candidate_list = []
+        for m in model_candidates:
+            if m and m not in candidate_list:
+                candidate_list.append(m)
 
-        for attempt in range(max_attempts):
+        for attempt, model_to_try in enumerate(candidate_list):
             payload = {
-                "model": current_model,
+                "model": model_to_try,
                 "messages": formatted_messages,
                 "temperature": temperature if temperature is not None else 0.7,
                 "max_tokens": max_tokens if max_tokens is not None else 1500
@@ -199,6 +209,10 @@ class GroqProvider(LLMProvider):
                 err_msg = resp.text
                 status = resp.status_code
 
+                if status == 404 or "model_not_found" in err_msg.lower() or "does not exist" in err_msg.lower():
+                    safe_print(f"[LLM Groq] Model '{model_to_try}' not found on Groq API (404). Cascading to next model...")
+                    continue
+
                 if status == 413 or ("context" in err_msg.lower() and "too large" in err_msg.lower()) or "maximum context length" in err_msg.lower():
                     error_type = "context_too_large"
                 elif status == 429 or "rate_limit" in err_msg.lower() or "tpm" in err_msg.lower() or "rate limit" in err_msg.lower():
@@ -208,13 +222,10 @@ class GroqProvider(LLMProvider):
                 else:
                     error_type = "other"
 
-                if error_type == "rate_limit" and attempt < max_attempts - 1:
-                    retry_delay = extract_retry_delay(err_msg) or 5.0
-                    safe_print(f"[LLM Groq] Rate limit/TPM hit on {current_model}. Waiting {retry_delay:.1f}s before retry {attempt+1}/{max_attempts}...")
-                    time.sleep(retry_delay + 1.0)
-                    # Switch to 8b-instant if 70b TPM limit persists
-                    if "llama-3.3-70b" in current_model or "qwen" in current_model:
-                        current_model = "llama-3.1-8b-instant"
+                if error_type == "rate_limit" and attempt < len(candidate_list) - 1:
+                    retry_delay = extract_retry_delay(err_msg) or 4.0
+                    safe_print(f"[LLM Groq] Rate limit/TPM hit on {model_to_try}. Waiting {retry_delay:.1f}s before trying next candidate...")
+                    time.sleep(retry_delay + 0.5)
                     continue
 
                 return {

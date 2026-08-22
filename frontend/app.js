@@ -441,18 +441,31 @@ function startPipelineResearch(query) {
     addInternalLog("phase", `Pipeline active across ${data.total_phases} phases: ${data.active_phases.join(" -> ")}`);
   });
 
+  const updateKGHeader = (nodes, edges) => {
+    const n = document.getElementById("kg-nodes");
+    const e = document.getElementById("kg-edges");
+    if (n && nodes !== undefined) n.innerText = nodes;
+    if (e && edges !== undefined) e.innerText = edges;
+  };
+
   eventSource.addEventListener("thinking", (e) => {
     const data = JSON.parse(e.data);
     if (data.phase_name && data.phase_num) {
       actSummary.innerText = `Researching... Phase ${data.phase_num} of ${data.total_phases || 8} (${data.phase_name})`;
     }
     addInternalLog("phase", data.message);
+
+    if (data.message) {
+      const match = data.message.match(/Knowledge Graph updated:\s*(\d+)\s*nodes,\s*(\d+)\s*relations/i);
+      if (match) {
+        updateKGHeader(match[1], match[2]);
+      }
+    }
   });
 
   eventSource.addEventListener("kg_update", (e) => {
     const data = JSON.parse(e.data);
-    document.getElementById("kg-nodes").innerText = data.num_nodes;
-    document.getElementById("kg-edges").innerText = data.num_edges;
+    updateKGHeader(data.num_nodes, data.num_edges);
     addInternalLog("memory", `Knowledge Graph updated: ${data.num_nodes} nodes, ${data.num_edges} relations`);
   });
 

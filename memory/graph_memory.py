@@ -475,6 +475,30 @@ class KnowledgeGraphMemory:
     # JSON Persistence
     # -------------------------------------------------------------
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Return dict export of nodes and edges for API serialization."""
+        nodes_data = []
+        for n, data in self.graph.nodes(data=True):
+            data_copy = dict(data)
+            if isinstance(data_copy.get("source_documents"), set):
+                data_copy["source_documents"] = list(data_copy["source_documents"])
+            data_copy["name"] = n
+            nodes_data.append(data_copy)
+
+        edges_data = []
+        for s, t, data in self.graph.edges(data=True):
+            edge_dict = dict(data)
+            edge_dict["source"] = s
+            edge_dict["target"] = t
+            edges_data.append(edge_dict)
+
+        return {
+            "schema_version": self.schema_version,
+            "alias_map": self.alias_map,
+            "nodes": nodes_data,
+            "edges": edges_data
+        }
+
     def save_to_json(self, filepath: Optional[str] = None) -> None:
         """Persist graph state to a JSON file."""
         target = filepath or self.storage_path

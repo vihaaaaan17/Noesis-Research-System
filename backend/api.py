@@ -214,6 +214,15 @@ async def stream_research(
                 })
                 return
 
+            # Export active Knowledge Graph to disk for live visualizer
+            try:
+                kg_export = working_mem.graph_memory.to_dict()
+                with open(os.path.join(REPORTS_DIR, "research_kg.json"), "w", encoding="utf-8") as kgf:
+                    json.dump(kg_export, kgf, indent=2)
+                working_mem.graph_memory.save_to_json("long_term_graph.json")
+            except Exception:
+                pass
+
             # Export full budget & LLM telemetry record to disk
             budget_metrics = orc.budget.get_summary()
             with open(os.path.join("reports", "telemetry_last_run.json"), "w", encoding="utf-8") as tf:
@@ -266,14 +275,23 @@ def chat_followup(req: FollowupRequest):
 def get_knowledge_graph():
     """Return complete Knowledge Graph nodes and edges for live visualizer."""
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    kg_path = os.path.join(root_dir, "reports", "research_kg.json")
+    
+    paths_to_check = [
+        os.path.join(root_dir, "long_term_graph.json"),
+        os.path.join(root_dir, "reports", "research_kg.json")
+    ]
+
     data = {}
-    if os.path.exists(kg_path):
-        try:
-            with open(kg_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            pass
+    for p in paths_to_check:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    content = json.load(f)
+                    if content and (content.get("nodes") or content.get("edges")):
+                        data = content
+                        break
+            except Exception:
+                pass
 
     if not data:
         wm = WorkingMemory(verbose=False)
