@@ -25,6 +25,7 @@ from pydantic import BaseModel
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import config
+import core.providers
 from memory.working_memory import WorkingMemory
 from memory.long_term import LongTermMemory
 from evals.telemetry import TelemetryLogger
@@ -285,7 +286,7 @@ def chat_followup(req: FollowupRequest):
         temperature=0.4,
         max_tokens=2500
     )
-    answer = config.core.providers.sanitize_scientific_markdown(raw_answer)
+    answer = core.providers.sanitize_scientific_markdown(raw_answer)
     return {"answer": answer}
 
 

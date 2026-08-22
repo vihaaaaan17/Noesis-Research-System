@@ -84,7 +84,8 @@ class LongFormGenerator:
         question: str,
         research_doc: Dict[str, str],
         working_memory=None,
-        long_term_memory=None
+        long_term_memory=None,
+        budget=None
     ) -> str:
         """
         Execute full research paper generation pipeline with outline, sections, and checkpoints.
