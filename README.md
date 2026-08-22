@@ -1,6 +1,6 @@
-# Autonomous Multi-Agent Research System (MAS)
+# Noesis : Autonomous Multi-Agent Research System 
 
-An academic-grade Multi-Agent System built in Python, designed to perform end-to-end scientific research, symbolic mathematical derivations, numerical simulations, and technical report writing. 
+An academic-grade Multi-Agent System built in Python, designed to perform end-to-end scientific research, symbolic mathematical derivations, numerical simulations, and technical report writing. The end goal is not to make another chat-bot but a research system focused purely to produce academic grade responses. [This is a personal project, i am learning about memory management and token budgeting to optimize the whole system, scalability is not focused here as of yet.]
 
 Powered by **Groq High-Throughput Llama-3.3-70B / Llama-3.1-8B-Instant** with **Google Gemini fallback (`gemini-3.1-flash-lite`)**, **Two-Memory Architecture (GraphRAG Knowledge Graph + ChromaDB Vector Memory)**, **Centralized Budget & Resilience Layer**, and an **8-Phase ReAct Research Orchestrator**.
 
