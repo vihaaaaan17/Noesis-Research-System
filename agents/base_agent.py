@@ -25,7 +25,7 @@ class Agent:
         self,
         name: str = "Agent",
         role: str = "You are a helpful assistant.",
-        provider: str = "groq",
+        provider: str = "gemini",
         fallback_provider: str = "gemini",
         model: Optional[str] = None,
         max_tokens: Optional[int] = None,

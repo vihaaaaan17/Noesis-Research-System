@@ -171,26 +171,53 @@ class LongFormGenerator:
     def _generate_answer(self, question: str, budget=None) -> str:
         """Single LLM response for answer mode."""
         messages = [
-            {"role": "system", "content": "You are a concise scientific assistant. Give a clear, direct answer."},
+            {
+                "role": "system",
+                "content": (
+                    "You are a concise scientific assistant. Give a clear, direct answer.\n"
+                    "CONSTRAINTS:\n"
+                    "1. DO NOT output any emojis.\n"
+                    "2. DO NOT output internal thinking processes, scratchpads, or 'Here's a thinking process:' preambles.\n"
+                    "3. Use LaTeX ($...$ or $$...$$) for equations."
+                )
+            },
             {"role": "user", "content": question}
         ]
-        return config.call_with_fallback(messages=messages, primary_model=self.model, max_tokens=1000, budget=budget, category="generation")
+        return config.call_with_fallback(messages=messages, primary_model=self.model, max_tokens=2048, budget=budget, category="generation")
 
     def _generate_paragraph(self, question: str, budget=None) -> str:
         """Single paragraph response mode."""
         messages = [
-            {"role": "system", "content": "Write exactly one clear, coherent, information-dense paragraph answering the prompt."},
+            {
+                "role": "system",
+                "content": (
+                    "Write exactly one clear, coherent, information-dense paragraph answering the prompt.\n"
+                    "CONSTRAINTS:\n"
+                    "1. DO NOT output any emojis.\n"
+                    "2. DO NOT output internal thinking processes, scratchpads, or 'Here's a thinking process:' preambles.\n"
+                    "3. Use LaTeX ($...$ or $$...$$) for equations."
+                )
+            },
             {"role": "user", "content": question}
         ]
-        return config.call_with_fallback(messages=messages, primary_model=self.model, max_tokens=400, budget=budget, category="generation")
+        return config.call_with_fallback(messages=messages, primary_model=self.model, max_tokens=1000, budget=budget, category="generation")
 
     def _generate_explanation(self, question: str, budget=None) -> str:
         """Multi-paragraph explanation mode."""
         messages = [
-            {"role": "system", "content": "Provide a clear, multi-paragraph technical explanation with key equations and physical concepts."},
+            {
+                "role": "system",
+                "content": (
+                    "Provide a clear, multi-paragraph technical explanation with key equations and physical concepts.\n"
+                    "CONSTRAINTS:\n"
+                    "1. DO NOT output any emojis (e.g. 🔹, 🧠, 📌, ✅, ⚠️, 📝, etc.).\n"
+                    "2. DO NOT output internal thinking processes, scratchpads, or 'Here's a thinking process:' preambles. Output ONLY clean text.\n"
+                    "3. Use standard LaTeX ($...$ or $$...$$) for equations."
+                )
+            },
             {"role": "user", "content": question}
         ]
-        return config.call_with_fallback(messages=messages, primary_model=self.model, max_tokens=1200, budget=budget, category="generation")
+        return config.call_with_fallback(messages=messages, primary_model=self.model, max_tokens=4096, budget=budget, category="generation")
 
     def _generate_long_form(self, question: str, research_doc=None, working_memory=None, long_term_memory=None, budget=None) -> str:
         """Generic chunk-based long-form response mode."""
@@ -362,28 +389,28 @@ class LongFormGenerator:
                     config.safe_print(f"{Fore.YELLOW}[REPORT] Gemini rate limit on '{sec_title}'. Waiting {retry_delay:.1f}s... (Attempt {attempt+1}/{max_retries}){Style.RESET_ALL}")
                 time.sleep(retry_delay + 1.0)
 
-        # 2. Emergency Safeguard Fallback to Groq
+        # 2. Emergency Safeguard Fallback to Gemini Flash Workhorse Cascade
         if self.verbose:
-            config.safe_print(f"{Fore.YELLOW}[REPORT] Gemini daily quota exhausted on '{sec_title}'. Executing Groq emergency fallback...{Style.RESET_ALL}")
+            config.safe_print(f"{Fore.YELLOW}[REPORT] Primary model unavailable on '{sec_title}'. Executing Gemini Flash cascade fallback...{Style.RESET_ALL}")
 
-        groq_res = config.call_llm_api(
+        gemini_fb_res = config.call_llm_api(
             messages=messages,
-            provider="groq",
-            model=config.GROQ_MODEL,
+            provider="gemini",
+            model="gemini-3.1-flash-lite",
             temperature=0.3,
-            max_tokens=1500
+            max_tokens=4096
         )
 
-        if groq_res and not groq_res.startswith("[") and not "API Error" in groq_res:
-            return groq_res.strip()
+        if gemini_fb_res and not gemini_fb_res.startswith("[") and not "API Error" in gemini_fb_res:
+            return gemini_fb_res.strip()
 
-        # 3. Final Fallback to 8b-instant Groq Model
+        # 3. Final Fallback to gemini-2.0-flash-lite Model
         fallback_res = config.call_llm_api(
             messages=messages,
-            provider="groq",
-            model="llama-3.1-8b-instant",
+            provider="gemini",
+            model="gemini-2.0-flash-lite",
             temperature=0.3,
-            max_tokens=1500
+            max_tokens=4096
         )
 
         if fallback_res and not fallback_res.startswith("[") and not "API Error" in fallback_res:

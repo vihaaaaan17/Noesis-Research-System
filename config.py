@@ -8,22 +8,28 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Model configuration (Provider and Model are separate concepts)
-# Groq: llama-3.3-70b-versatile (14,000 TPM) / llama-3.1-8b-instant (100,000 TPM)
-GROQ_MODEL = os.getenv("GROQ_MODEL", os.getenv("DEFAULT_MODEL", "llama-3.3-70b-versatile"))
-
-# Gemini: gemini-3.1-flash-lite
+# Gemini Model Tier Configurations
 GEMINI_RESEARCH_MODEL = os.getenv("GEMINI_RESEARCH_MODEL", "gemini-3.1-flash-lite")
-GEMINI_FINAL_MODEL = os.getenv("GEMINI_FINAL_MODEL", "gemini-3.1-flash-lite")
+GEMINI_FINAL_MODEL = os.getenv("GEMINI_FINAL_MODEL", "gemini-3.7-flash")
+GEMINI_PRO_MODEL = os.getenv("GEMINI_PRO_MODEL", "gemini-2.5-pro")
 
-DEFAULT_FLASH_MODEL = GROQ_MODEL
-DEFAULT_PRO_MODEL = GROQ_MODEL
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", GROQ_MODEL)
+# Gemini Multi-Model Zero-Sleep Failover Cascade
+GEMINI_CASCADE_MODELS = [
+    "gemini-3.1-flash-lite",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+    "gemini-2.5-flash",
+    "gemini-3.7-flash"
+]
+
+DEFAULT_FLASH_MODEL = GEMINI_RESEARCH_MODEL
+DEFAULT_PRO_MODEL = GEMINI_FINAL_MODEL
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", GEMINI_RESEARCH_MODEL)
 
 VERBOSE = os.getenv("VERBOSE", "true").lower() == "true"
 
 # Agent default output token budgets
-DEFAULT_MAX_TOKENS = 1500            # Controlled output budget for Stage 1 research steps
+DEFAULT_MAX_TOKENS = 4096            # Expanded output budget for Stage 1 research & explanation steps
 DEFAULT_TEMPERATURE = 0.7
 REPORT_SECTION_MAX_TOKENS = 8000     # Gemini report section output budget
 

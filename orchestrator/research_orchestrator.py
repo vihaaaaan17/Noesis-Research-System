@@ -70,6 +70,7 @@ class ResearchOrchestrator:
         working_memory: Optional[WorkingMemory] = None,
         long_term_memory: Optional[LongTermMemory] = None,
         enable_judge: bool = False,
+        **kwargs
     ):
         self.depth = depth
         self.mode = mode

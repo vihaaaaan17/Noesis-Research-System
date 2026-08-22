@@ -58,7 +58,7 @@ class SmartModelRouter:
         verbose: bool = True
     ):
         self.depth = depth.lower()
-        self.groq_model = groq_model or config.GROQ_MODEL
+        self.groq_model = groq_model or getattr(config, "GROQ_MODEL", "llama-3.3-70b-versatile")
         self.gemini_research_model = gemini_research_model or config.GEMINI_RESEARCH_MODEL
         self.gemini_final_model = gemini_final_model or config.GEMINI_FINAL_MODEL
         self.verbose = verbose
@@ -72,21 +72,28 @@ class SmartModelRouter:
         clean_phase = phase_name.lower().strip()
         complexity = override_complexity or self.PHASE_COMPLEXITY.get(clean_phase, "medium")
 
-        # Stage 2: Final Report Phase is ALWAYS Gemini-only
+        # 100% Gemini Provider Model Architecture
         if clean_phase in ["report", "final"]:
             route = {
                 "provider": "gemini",
                 "model": self.gemini_final_model,
                 "fallback_provider": "gemini",
-                "fallback_model": self.gemini_final_model
+                "fallback_model": self.gemini_research_model
             }
-        else:
-            # Stage 1: Research Phases default to Groq primary with Gemini fallback
+        elif clean_phase in ["mathematics", "math", "judge"]:
             route = {
-                "provider": "groq",
-                "model": self.groq_model,
+                "provider": "gemini",
+                "model": getattr(config, "GEMINI_PRO_MODEL", "gemini-2.5-pro"),
                 "fallback_provider": "gemini",
                 "fallback_model": self.gemini_research_model
+            }
+        else:
+            # Stage 1 Research Phases default to GEMINI_RESEARCH_MODEL (gemini-3.1-flash-lite)
+            route = {
+                "provider": "gemini",
+                "model": self.gemini_research_model,
+                "fallback_provider": "gemini",
+                "fallback_model": "gemini-2.0-flash-lite"
             }
 
         if self.verbose:

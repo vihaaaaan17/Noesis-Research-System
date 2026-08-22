@@ -58,7 +58,7 @@ class JudgeAgent:
     def __init__(
         self,
         name: str = "JudgeAgent",
-        provider: str = "groq",
+        provider: str = "gemini",
         model: Optional[str] = None,
         verbose: bool = True
     ):

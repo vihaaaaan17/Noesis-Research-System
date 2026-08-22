@@ -104,50 +104,43 @@ def get_report(filename: str):
 _ACTIVE_STREAM_LOCK = asyncio.Lock()
 
 
+active_working_memory = None
+
+
 @app.get("/api/research/stream")
 async def stream_research(
-    question: str = Query(..., description="The research question to investigate"),
-    depth: str = Query("standard", description="Execution depth: quick, standard, deep"),
-    mode: str = Query("research_paper", description="Generation mode: research_paper, long_form, explanation, paragraph, answer")
+    question: str = Query(..., description="Research question or topic"),
+    depth: str = Query("standard", description="Research depth: quick, standard, or deep"),
+    mode: str = Query("explanation", description="Output format mode")
 ):
     """
-    Stream real-time research execution events via SSE (Server-Sent Events).
-    Emits explicit structured event payloads with visibility and category.
+    SSE Endpoint streaming live research phase transitions, ReAct tool executions,
+    Knowledge Graph updates, and the final synthesis report.
     """
-    async def event_generator() -> AsyncGenerator[str, None]:
-        def send_event(event_type: str, data: dict) -> str:
+    global active_working_memory
+
+    async def event_generator():
+        global active_working_memory
+        def send_event(event_type: str, data: Dict[str, Any]) -> str:
             return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
-        async with _ACTIVE_STREAM_LOCK:
-            yield send_event("status", {
-                "visibility": "system",
-                "category": "PHASE_STATUS",
-                "message": f"Initializing Research Orchestrator ({depth.upper()} mode, mode='{mode}')..."
-            })
-            await asyncio.sleep(0.1)
+        yield send_event("status", {
+            "visibility": "system",
+            "category": "PHASE_STATUS",
+            "message": f"Initializing Research Orchestrator ({depth.upper()} mode, mode='{mode}')..."
+        })
 
-            working_mem = WorkingMemory(verbose=False)
-            long_term_mem = LongTermMemory(verbose=False)
-            telemetry = TelemetryLogger(run_name=f"Web_Run_{depth}", verbose=False)
+        working_mem = WorkingMemory(verbose=False)
+        active_working_memory = working_mem
+        long_mem = LongTermMemory(verbose=False)
 
+        try:
             orc = ResearchOrchestrator(
+                working_memory=working_mem,
+                long_term_memory=long_mem,
                 depth=depth,
                 mode=mode,
-                output_dir="reports",
-                verbose=True,
-                working_memory=working_mem,
-                long_term_memory=long_term_mem,
-                enable_judge=True
-            )
-
-            orc.register_agents(
-                scout=literature_scout(verbose=False),
-                mathematician=mathematician(verbose=False),
-                engineer=engineer(domain="general", verbose=False),
-                numerical=numerical_analyst(verbose=False),
-                reviewer=peer_reviewer(verbose=False),
-                synthesizer=synthesizer(verbose=False),
-                writer=report_writer(verbose=False),
+                verbose=False
             )
 
             active_phases = orc.DEPTH_PHASES.get(depth, orc.DEPTH_PHASES["standard"])
@@ -183,6 +176,14 @@ async def stream_research(
                     })
 
                     val_stats = working_mem.graph_memory.validate()
+                    # Export active graph to disk live during stream
+                    try:
+                        kg_export = working_mem.graph_memory.to_dict()
+                        with open(os.path.join(REPORTS_DIR, "research_kg.json"), "w", encoding="utf-8") as kgf:
+                            json.dump(kg_export, kgf, indent=2)
+                    except Exception:
+                        pass
+
                     yield send_event("kg_update", {
                         "visibility": "internal",
                         "category": "MEMORY_ACTIVITY",
@@ -236,6 +237,12 @@ async def stream_research(
                 "report_markdown": final_result,
                 "telemetry": budget_metrics
             })
+        except Exception as err:
+            yield send_event("pipeline_error", {
+                "visibility": "system",
+                "category": "ERROR",
+                "error": f"Orchestrator error: {str(err)}"
+            })
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -249,11 +256,21 @@ class FollowupRequest(BaseModel):
 @app.post("/api/chat/followup")
 def chat_followup(req: FollowupRequest):
     """Interactive follow-up question endpoint using query-aware memory retrieval."""
-    wm = WorkingMemory(verbose=False)
+    wm = active_working_memory or WorkingMemory(verbose=False)
     query_context = wm.get_context(req.question)
 
     messages = [
-        {"role": "system", "content": f"You are an AI research assistant. Answer the follow-up query using LaTeX for equations where appropriate.\n\n### RELEVANT MEMORY CONTEXT:\n{query_context}"}
+        {
+            "role": "system",
+            "content": (
+                "You are an academic AI research assistant. Answer the follow-up query with clean markdown and LaTeX for equations.\n"
+                "CRITICAL CONSTRAINTS:\n"
+                "1. DO NOT output any emojis (e.g. 🔹, 🧠, 📌, ✅, ⚠️, 📝, etc.).\n"
+                "2. DO NOT output internal thinking processes, scratchpads, or 'Here's a thinking process:' preambles. Output ONLY the clean final answer.\n"
+                "3. Use standard LaTeX math delimiters ($ ... $ for inline math, $$ ... $$ for display math).\n\n"
+                f"### RELEVANT MEMORY CONTEXT:\n{query_context}"
+            )
+        }
     ]
 
     if req.history:
@@ -262,36 +279,45 @@ def chat_followup(req: FollowupRequest):
 
     messages.append({"role": "user", "content": req.question})
 
-    answer = config.call_with_fallback(
+    raw_answer = config.call_with_fallback(
         messages=messages,
         primary_model=config.GEMINI_FINAL_MODEL,
         temperature=0.4,
         max_tokens=2500
     )
+    answer = config.core.providers.sanitize_scientific_markdown(raw_answer)
     return {"answer": answer}
 
 
 @app.get("/api/graph")
 def get_knowledge_graph():
     """Return complete Knowledge Graph nodes and edges for live visualizer."""
-    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    
-    paths_to_check = [
-        os.path.join(root_dir, "long_term_graph.json"),
-        os.path.join(root_dir, "reports", "research_kg.json")
-    ]
-
+    global active_working_memory
     data = {}
-    for p in paths_to_check:
-        if os.path.exists(p):
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    content = json.load(f)
-                    if content and (content.get("nodes") or content.get("edges")):
-                        data = content
-                        break
-            except Exception:
-                pass
+
+    if active_working_memory:
+        try:
+            data = active_working_memory.graph_memory.to_dict()
+        except Exception:
+            pass
+
+    if not data or not (data.get("nodes") or data.get("edges")):
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        paths_to_check = [
+            os.path.join(root_dir, "reports", "research_kg.json"),
+            os.path.join(root_dir, "long_term_graph.json")
+        ]
+
+        for p in paths_to_check:
+            if os.path.exists(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        content = json.load(f)
+                        if content and (content.get("nodes") or content.get("edges")):
+                            data = content
+                            break
+                except Exception:
+                    pass
 
     if not data:
         wm = WorkingMemory(verbose=False)
@@ -335,5 +361,14 @@ def get_knowledge_graph():
 
 # Mount static frontend directory
 frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
+
+@app.get("/research/{full_path:path}")
+def serve_research_spa(full_path: str):
+    """Fallback route for SPA frontend navigation on /research/* routes."""
+    index_file = os.path.join(frontend_dir, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    raise HTTPException(status_code=404, detail="Index file not found")
+
 if os.path.exists(frontend_dir):
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")

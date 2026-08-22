@@ -35,15 +35,40 @@ window.togglePromptMode = function(mode) {
 
   if (currentPromptMode === "search") {
     pills.search?.classList.add("active-search");
-    if (queryInput) queryInput.placeholder = "Search the web...";
+    if (queryInput) {
+      queryInput.placeholder = "Search web & academic literature...";
+      if (!queryInput.value.startsWith("/search")) {
+        queryInput.value = "/search " + queryInput.value.replace(/^\/\w+\s*/, "");
+      }
+      queryInput.focus();
+    }
   } else if (currentPromptMode === "think") {
     pills.think?.classList.add("active-think");
-    if (queryInput) queryInput.placeholder = "Think deeply...";
+    selectedMode = "deep";
+    document.querySelectorAll(".mode-btn").forEach(b => {
+      b.classList.toggle("active", b.dataset.mode === "deep");
+    });
+    if (queryInput) {
+      queryInput.placeholder = "Deep reasoning mode (Flash/Pro smart routing)...";
+      if (!queryInput.value.startsWith("/think")) {
+        queryInput.value = "/think " + queryInput.value.replace(/^\/\w+\s*/, "");
+      }
+      queryInput.focus();
+    }
   } else if (currentPromptMode === "canvas") {
     pills.canvas?.classList.add("active-canvas");
-    if (queryInput) queryInput.placeholder = "Create on canvas...";
+    if (queryInput) {
+      queryInput.placeholder = "Create structured report on canvas...";
+      if (!queryInput.value.startsWith("/canvas")) {
+        queryInput.value = "/canvas " + queryInput.value.replace(/^\/\w+\s*/, "");
+      }
+      queryInput.focus();
+    }
   } else {
-    if (queryInput) queryInput.placeholder = "Type your message here or type '/' for commands…";
+    if (queryInput) {
+      queryInput.placeholder = "Type your message here or type '/' for commands…";
+      queryInput.value = queryInput.value.replace(/^\/\w+\s*/, "");
+    }
   }
 };
 
@@ -97,10 +122,200 @@ function insertCommand(cmd) {
   if (palette) palette.style.display = "none";
 }
 
+function initAuralisBackground() {
+  const canvas = document.getElementById("auralis-bg-canvas");
+  const container = document.getElementById("auralis-container");
+  if (!canvas || !container) return;
+
+  const gl = canvas.getContext("webgl", { antialias: true });
+  if (!gl) return;
+
+  const vertexShaderGLSL = `
+  attribute vec2 position;
+  varying vec2 vUv;
+  void main() {
+    vUv = position * 0.5 + 0.5;
+    gl_Position = vec4(position, 0.0, 1.0);
+  }
+  `;
+
+  const fragmentShaderGLSL = `
+  precision highp float;
+  varying vec2 vUv;
+
+  uniform vec2  u_resolution;
+  uniform float u_time;
+  uniform float u_grain;
+  uniform vec3  u_colors[3];
+
+  vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+
+  float snoise(vec2 v) {
+    const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+    vec2 i  = floor(v + dot(v, C.yy));
+    vec2 x0 = v - i + dot(i, C.xx);
+    vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+    vec4 x12 = x0.xyxy + C.xxzz;
+    x12.xy -= i1;
+    i = mod289(i);
+    vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+    vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+    m = m*m; m = m*m;
+    vec3 x = 2.0 * fract(p * C.www) - 1.0;
+    vec3 h = abs(x) - 0.5;
+    vec3 ox = floor(x + 0.5);
+    vec3 a0 = x - ox;
+    m *= 1.79284291400159 - 0.85373472095314 * (a0*a0 + h*h);
+    vec3 g;
+    g.x  = a0.x  * x0.x  + h.x  * x0.y;
+    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+    return 130.0 * dot(m, g);
+  }
+
+  void main() {
+    vec2 uv = vUv;
+    float ratio = u_resolution.x / u_resolution.y;
+    vec2 p = uv * vec2(ratio, 1.0);
+    float t = u_time * 0.2;
+
+    float n1 = snoise(p * 0.5 + t);
+    float n2 = snoise(p * 0.9 - t * 0.5 + n1);
+    
+    float light = pow(abs(n2), 2.5) * 0.5; 
+
+    vec3 col = vec3(0.02, 0.01, 0.01); 
+
+    col += u_colors[0] * smoothstep(0.1, 1.0, n1) * 0.5;
+    col += u_colors[1] * light;
+
+    float grain = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453 + u_time);
+    col += (grain - 0.5) * u_grain * 0.5;
+
+    float dist = length(uv - 0.5);
+    col *= smoothstep(1.2, 0.2, dist);
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+  `;
+
+  const createShader = (type, src) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    return s;
+  };
+
+  const program = gl.createProgram();
+  gl.attachShader(program, createShader(gl.VERTEX_SHADER, vertexShaderGLSL));
+  gl.attachShader(program, createShader(gl.FRAGMENT_SHADER, fragmentShaderGLSL));
+  gl.linkProgram(program);
+  gl.useProgram(program);
+
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+
+  const pos = gl.getAttribLocation(program, "position");
+  gl.enableVertexAttribArray(pos);
+  gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+
+  const locs = {
+    res: gl.getUniformLocation(program, "u_resolution"),
+    time: gl.getUniformLocation(program, "u_time"),
+    grain: gl.getUniformLocation(program, "u_grain"),
+    colors: gl.getUniformLocation(program, "u_colors"),
+  };
+
+  const hexToRgb = (hex) => {
+    const h = hex.replace("#", "");
+    return [
+      parseInt(h.slice(0, 2), 16) / 255,
+      parseInt(h.slice(2, 4), 16) / 255,
+      parseInt(h.slice(4, 6), 16) / 255,
+    ];
+  };
+
+  const colors = ["#ef4444", "#dc2626", "#b91c1c"];
+  const speed = 0.3;
+  const grain = 0.6;
+
+  const resize = () => {
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    canvas.width = container.clientWidth * dpr;
+    canvas.height = container.clientHeight * dpr;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+  };
+
+  const ro = new ResizeObserver(resize);
+  ro.observe(container);
+  resize();
+
+  function render(t) {
+    gl.uniform2f(locs.res, canvas.width, canvas.height);
+    gl.uniform1f(locs.time, t * 0.001 * speed);
+    gl.uniform1f(locs.grain, grain);
+
+    const flat = new Float32Array(colors.slice(0, 3).flatMap(hexToRgb));
+    gl.uniform3fv(locs.colors, flat);
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    requestAnimationFrame(render);
+  }
+
+  requestAnimationFrame(render);
+}
+
 // Initialize Chat App
 document.addEventListener("DOMContentLoaded", () => {
+  initAuralisBackground();
   loadSavedChats();
   initFileUpload();
+
+  // Clickable Noesis brand navigation
+  const brandHome = document.getElementById("nav-brand-home");
+  if (brandHome) {
+    brandHome.addEventListener("click", () => {
+      startNewChat();
+    });
+  }
+
+  // Browser Back/Forward navigation listener
+  window.addEventListener("popstate", (event) => {
+    const state = event.state;
+    if (state && state.view === "research") {
+      if (state.sessionId && chatSessions[state.sessionId]) {
+        loadChatSession(state.sessionId, false);
+      } else {
+        navigateToView("research", null, false);
+      }
+    } else {
+      navigateToView("home", null, false);
+    }
+  });
+
+  // Initial Route Check
+  const currentPath = window.location.pathname;
+  if (currentPath.startsWith("/research/")) {
+    const sessionMatch = currentPath.split("/research/")[1];
+    if (sessionMatch && chatSessions[sessionMatch]) {
+      loadChatSession(sessionMatch, false);
+    } else {
+      navigateToView("home", null, false);
+    }
+  } else {
+    navigateToView("home", null, false);
+  }
+
+  // Sidebar collapse toggle handler
+  const sidebarToggleBtn = document.getElementById("sidebar-toggle-btn");
+  const sidebar = document.getElementById("sidebar");
+  if (sidebarToggleBtn && sidebar) {
+    sidebarToggleBtn.addEventListener("click", () => {
+      sidebar.classList.toggle("collapsed");
+    });
+  }
 
   // Mode Selection buttons
   document.querySelectorAll(".mode-btn").forEach(btn => {
@@ -199,6 +414,63 @@ function loadSavedChats() {
   renderSidebarHistory();
 }
 
+let currentView = "home";
+
+window.resetKGCounters = function() {
+  const nodesElem = document.getElementById("kg-nodes");
+  const edgesElem = document.getElementById("kg-edges");
+  if (nodesElem) nodesElem.innerText = "0";
+  if (edgesElem) edgesElem.innerText = "0";
+};
+
+window.scrollToBottom = function() {
+  const scrollArea = document.getElementById("research-scroll-area");
+  if (scrollArea) {
+    requestAnimationFrame(() => {
+      scrollArea.scrollTop = scrollArea.scrollHeight;
+    });
+    setTimeout(() => {
+      scrollArea.scrollTop = scrollArea.scrollHeight;
+    }, 100);
+  }
+};
+
+window.navigateToView = function(viewName, sessionId = null, pushState = true) {
+  currentView = viewName;
+  const homeView = document.getElementById("home-view");
+  const researchView = document.getElementById("research-view");
+
+  if (viewName === "research") {
+    document.body.classList.add("research-active");
+    if (homeView) homeView.style.display = "none";
+    if (researchView) researchView.style.display = "flex";
+
+    if (sessionId) {
+      activeChatId = sessionId;
+      renderSidebarHistory();
+    }
+
+    if (pushState) {
+      const path = sessionId ? `/research/${sessionId}` : "/research/session";
+      try {
+        history.pushState({ view: "research", sessionId: activeChatId }, "", path);
+      } catch (e) {}
+    }
+  } else {
+    document.body.classList.remove("research-active");
+    if (researchView) researchView.style.display = "none";
+    if (homeView) homeView.style.display = "flex";
+
+    resetKGCounters();
+
+    if (pushState) {
+      try {
+        history.pushState({ view: "home" }, "", "/");
+      } catch (e) {}
+    }
+  }
+};
+
 function saveChats() {
   try {
     localStorage.setItem("MAS_CHAT_SESSIONS", JSON.stringify(chatSessions));
@@ -212,15 +484,48 @@ function renderSidebarHistory() {
   list.innerHTML = "";
 
   const sortedIds = Object.keys(chatSessions).sort((a, b) => chatSessions[b].updatedAt - chatSessions[a].updatedAt);
+  if (sortedIds.length === 0) return;
+
+  const now = Date.now();
+  const oneDayMs = 24 * 60 * 60 * 1000;
+
+  const todaySessions = [];
+  const yesterdaySessions = [];
+  const previousSessions = [];
 
   sortedIds.forEach(id => {
     const session = chatSessions[id];
-    const item = document.createElement("div");
-    item.className = `chat-history-item ${id === activeChatId ? 'active' : ''}`;
-    item.innerText = session.title || "Research run";
-    item.onclick = () => loadChatSession(id);
-    list.appendChild(item);
+    const diff = now - (session.updatedAt || now);
+    if (diff < oneDayMs) {
+      todaySessions.push({ id, session });
+    } else if (diff < 2 * oneDayMs) {
+      yesterdaySessions.push({ id, session });
+    } else {
+      previousSessions.push({ id, session });
+    }
   });
+
+  const renderGroup = (groupTitle, items) => {
+    if (items.length === 0) return;
+    const groupHeader = document.createElement("div");
+    groupHeader.className = "history-group-header";
+    groupHeader.style.cssText = "font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: rgba(255, 255, 255, 0.4); margin: 8px 0 4px 4px;";
+    groupHeader.innerText = groupTitle;
+    list.appendChild(groupHeader);
+
+    items.forEach(({ id, session }) => {
+      const item = document.createElement("div");
+      item.className = `chat-history-item ${id === activeChatId ? 'active' : ''}`;
+      item.innerText = session.title || "Research run";
+      item.title = session.title || "Research run";
+      item.onclick = () => loadChatSession(id, true);
+      list.appendChild(item);
+    });
+  };
+
+  renderGroup("TODAY", todaySessions);
+  renderGroup("YESTERDAY", yesterdaySessions);
+  renderGroup("PREVIOUS", previousSessions);
 }
 
 function startNewChat() {
@@ -228,59 +533,40 @@ function startNewChat() {
   activeChatId = null;
   activeReportContext = "";
 
+  resetKGCounters();
+  navigateToView("home", null, true);
+
   const container = document.getElementById("chat-messages");
-  container.innerHTML = `
-    <div class="welcome-screen" id="welcome-screen">
-      <h1 class="claude-serif-title">Noesis</h1>
-      <p>Enter a research question or request a technical derivation to trigger the multi-agent execution pipeline.</p>
-      <div class="command-chips">
-        <button class="cmd-pill-btn" onclick="insertCommand('/literature ')">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
-          Literature
-        </button>
-        <button class="cmd-pill-btn" onclick="insertCommand('/math ')">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect><line x1="8" y1="12" x2="16" y2="12"></line><line x1="12" y1="8" x2="12" y2="16"></line></svg>
-          Mathematics
-        </button>
-        <button class="cmd-pill-btn" onclick="insertCommand('/compute ')">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect></svg>
-          Compute
-        </button>
-        <button class="cmd-pill-btn" onclick="insertCommand('/review ')">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-          Review
-        </button>
-      </div>
-    </div>
-  `;
+  if (container) container.innerHTML = "";
   renderSidebarHistory();
 }
 
-function loadChatSession(id) {
+function loadChatSession(id, pushState = true) {
   const session = chatSessions[id];
   if (!session) return;
   activeChatId = id;
   activeReportContext = session.reportContext || "";
 
-  renderSidebarHistory();
+  navigateToView("research", id, pushState);
 
   const container = document.getElementById("chat-messages");
   container.innerHTML = "";
 
   session.messages.forEach((msg, idx) => {
     if (msg.role === "user") {
-      appendUserBubble(msg.text);
+      appendUserBubbleNoNav(msg.text);
     } else {
       appendAssistantTurnHtml(msg.text, msg.thinkingLogs, msg.judgeResult, `msg-${idx}`);
     }
   });
+
+  const scrollArea = document.getElementById("research-scroll-area");
+  if (scrollArea) {
+    scrollArea.scrollTop = scrollArea.scrollHeight;
+  }
 }
 
-// User Message Bubble
-function appendUserBubble(text) {
-  const welcome = document.getElementById("welcome-screen");
-  if (welcome) welcome.remove();
-
+function appendUserBubbleNoNav(text) {
   const container = document.getElementById("chat-messages");
   const turn = document.createElement("div");
   turn.className = "message-turn";
@@ -291,7 +577,18 @@ function appendUserBubble(text) {
 
   turn.appendChild(bubble);
   container.appendChild(turn);
-  container.scrollTop = container.scrollHeight;
+}
+
+// User Message Bubble
+function appendUserBubble(text) {
+  navigateToView("research", activeChatId, true);
+
+  appendUserBubbleNoNav(text);
+
+  const scrollArea = document.getElementById("research-scroll-area");
+  if (scrollArea) {
+    scrollArea.scrollTop = scrollArea.scrollHeight;
+  }
 }
 
 // Assistant Turn with Dedicated Internal Activity Panel & Clean Main Response Area
@@ -312,11 +609,23 @@ function appendAssistantTurn(turnId) {
       <div class="activity-log" id="act-log-${turnId}"></div>
     </div>
     <div class="assistant-content markdown-body" id="content-${turnId}"></div>
+    <div class="assistant-actions-bar">
+      <button class="copy-response-btn" onclick="copyResponseText('content-${turnId}', this)">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        <span>Copy response</span>
+      </button>
+    </div>
     <div id="judge-${turnId}"></div>
   `;
 
   container.appendChild(turn);
-  container.scrollTop = container.scrollHeight;
+  const scrollArea = document.getElementById("research-scroll-area");
+  if (scrollArea) {
+    scrollArea.scrollTop = scrollArea.scrollHeight;
+  }
 }
 
 function toggleActivityPanel(turnId) {
@@ -354,18 +663,29 @@ function appendAssistantTurnHtml(text, thinkingLogs, judgeResult, turnId) {
       <div class="activity-log">${thinkingLogsHtml}</div>
     </div>` : ''}
     <div class="assistant-content markdown-body" id="content-${turnId}"></div>
+    <div class="assistant-actions-bar">
+      <button class="copy-response-btn" onclick="copyResponseText('content-${turnId}', this)">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        <span>Copy response</span>
+      </button>
+    </div>
     ${judgeHtml}
   `;
 
   container.appendChild(turn);
 
   const contentElem = document.getElementById(`content-${turnId}`);
+  const cleanText = window.normalizeLaTeX ? window.normalizeLaTeX(text) : text;
   if (typeof marked !== "undefined") {
-    contentElem.innerHTML = marked.parse(text);
+    contentElem.innerHTML = marked.parse(cleanText);
   } else {
-    contentElem.innerText = text;
+    contentElem.innerText = cleanText;
   }
   renderKaTeXMath(`content-${turnId}`);
+  scrollToBottom();
 }
 
 // Handle User Input
@@ -629,7 +949,11 @@ function initGraphStudio() {
   if (openBtn) {
     openBtn.addEventListener("click", () => {
       modal.style.display = "flex";
-      loadAndRenderGraph();
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          loadAndRenderGraph();
+        }, 100);
+      });
     });
   }
 
@@ -848,6 +1172,13 @@ function render2DVisNetwork(nodes, edges) {
 
   visNetworkInstance = new vis.Network(container, graphData, options);
 
+  setTimeout(() => {
+    if (visNetworkInstance) {
+      visNetworkInstance.fit({ animation: false });
+      visNetworkInstance.redraw();
+    }
+  }, 120);
+
   // Click Node Inspector Handler
   visNetworkInstance.on("selectNode", (params) => {
     const nodeId = params.nodes[0];
@@ -1019,14 +1350,86 @@ function showNodeInspector(title, type, description, nodeId) {
   inspector.style.display = "block";
 }
 
+// Copy Response Text Helper
+window.copyResponseText = function(containerId, btnElem) {
+  const elem = document.getElementById(containerId);
+  if (!elem) return;
+
+  const textToCopy = elem.innerText || elem.textContent;
+  navigator.clipboard.writeText(textToCopy).then(() => {
+    if (btnElem) {
+      const originalHtml = btnElem.innerHTML;
+      btnElem.innerHTML = `
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+        <span style="color: #10b981;">Copied!</span>
+      `;
+      setTimeout(() => {
+        btnElem.innerHTML = originalHtml;
+      }, 2000);
+    }
+  }).catch(err => {
+    console.error("Failed to copy text:", err);
+  });
+};
+
+// LaTeX Normalization & Preprocessing Engine
+window.normalizeLaTeX = function(text) {
+  if (!text || typeof text !== "string") return text || "";
+
+  // 1. Convert display brackets \[ ... \] -> $$ ... $$ and \( ... \) -> $ ... $
+  text = text.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
+  text = text.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+
+  // 2. Unescape escaped underscores in math contexts (P\_{win} -> P_{win}, Amount\_{loss} -> Amount_{loss})
+  text = text.replace(/\\_\{([^}]+)\}/g, '_{$1}');
+  text = text.replace(/\\_([a-zA-Z0-9]+)/g, '_$1');
+
+  // 3. Fix malformed asterisk subscripts produced by LLMs (Amount*{win} -> Amount_{win}, P*{loss} -> P_{loss})
+  text = text.replace(/([a-zA-Z0-9\}])\s*\*\{([^}]+)\}/g, '$1_{$2}');
+  text = text.replace(/([a-zA-Z0-9\}])\s*\*([a-zA-Z0-9]+)/g, '$1_$2');
+
+  // 4. Ensure \text{...} macros have properly attached subscripts
+  text = text.replace(/\\text\{([^}]+)\}\\_/g, '\\text{$1}_');
+  text = text.replace(/\\text\{([^}]+)\}\*/g, '\\text{$1}_');
+
+  // 5. Clean up duplicate underscores
+  text = text.replace(/_{2,}/g, '_');
+
+  return text;
+};
+
+// ChatGPT-style KaTeX LaTeX Math Renderer
+window.renderKaTeXMath = function(containerId) {
+  const elem = document.getElementById(containerId);
+  if (!elem) return;
+
+  // Pre-normalize any raw text or innerHTML if needed
+  if (elem.childNodes.length === 1 && elem.childNodes[0].nodeType === 3) {
+    elem.textContent = window.normalizeLaTeX(elem.textContent);
+  }
+
+  // Render KaTeX safely if library is available
+  if (typeof renderMathInElement !== "undefined") {
+    try {
+      renderMathInElement(elem, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$", right: "$", display: false },
+          { left: "\\[", right: "\\]", display: true },
+          { left: "\\(", right: "\\)", display: false }
+        ],
+        throwOnError: false,
+        ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code"]
+      });
+    } catch (err) {
+      console.warn("KaTeX rendering warning:", err);
+    }
+  }
+};
+
 document.addEventListener("DOMContentLoaded", () => {
   initGraphStudio();
-  fetch("/api/graph")
-    .then(r => r.json())
-    .then(d => {
-      if (d && d.num_nodes !== undefined) {
-        document.getElementById("kg-nodes").innerText = d.num_nodes;
-        document.getElementById("kg-edges").innerText = d.num_edges;
-      }
-    }).catch(() => {});
+  resetKGCounters();
 });

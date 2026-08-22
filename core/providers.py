@@ -17,6 +17,7 @@ import os
 import re
 import time
 import requests
+import unicodedata
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
 from colorama import Fore, Style, init
@@ -204,6 +205,7 @@ class GroqProvider(LLMProvider):
                 if resp.status_code == 200:
                     data = resp.json()
                     content = data["choices"][0]["message"]["content"]
+                    content = sanitize_scientific_markdown(content)
                     return {"success": True, "text": content}
 
                 err_msg = resp.text
@@ -257,7 +259,7 @@ class GroqProvider(LLMProvider):
 
 
 class GeminiProvider(LLMProvider):
-    """Google Gemini SDK Provider implementation with rate limit auto-sleep."""
+    """Google Gemini SDK Provider implementation with Zero-Sleep Multi-Model Failover Cascade."""
 
     @property
     def name(self) -> str:
@@ -267,6 +269,7 @@ class GeminiProvider(LLMProvider):
         self,
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
+        model_candidates: Optional[List[str]] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         timeout: int = 60
@@ -290,8 +293,19 @@ class GeminiProvider(LLMProvider):
                 "error_type": "auth_error"
             }
 
-        target_model = model or os.getenv("GEMINI_RESEARCH_MODEL", "gemini-3.1-flash-lite")
-        gemini_model_name = target_model if "gemini" in target_model.lower() else "gemini-3.1-flash-lite"
+        # Build prioritized list of model candidates for instant 0ms failover
+        candidates = []
+        if model:
+            candidates.append(model)
+        if model_candidates:
+            for c in model_candidates:
+                if c not in candidates:
+                    candidates.append(c)
+
+        default_cascade = ["gemini-3.1-flash-lite", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-2.5-flash", "gemini-3.7-flash"]
+        for c in default_cascade:
+            if c not in candidates:
+                candidates.append(c)
 
         sys_parts = []
         contents = []
@@ -314,10 +328,10 @@ class GeminiProvider(LLMProvider):
         if not contents:
             contents.append({"role": "user", "parts": ["Hello"]})
 
-        max_attempts = 3
-        current_model = gemini_model_name
+        last_error = ""
+        last_error_type = "other"
 
-        for attempt in range(max_attempts):
+        for idx, current_model in enumerate(candidates):
             try:
                 mobj = genai.GenerativeModel(model_name=current_model, system_instruction=sys_instruction)
                 gen_config = {
@@ -327,38 +341,30 @@ class GeminiProvider(LLMProvider):
                 res = mobj.generate_content(contents, generation_config=gen_config)
 
                 if hasattr(res, "text") and res.text:
-                    return {"success": True, "text": res.text}
+                    clean_text = sanitize_scientific_markdown(res.text)
+                    return {"success": True, "text": clean_text, "model_used": current_model}
                 else:
-                    return {
-                        "success": False,
-                        "error": "[Gemini API Error]: Empty text returned in response.",
-                        "error_type": "other"
-                    }
+                    last_error = "[Gemini API Error]: Empty text returned in response."
+                    last_error_type = "empty_response"
             except Exception as e:
                 err_str = str(e)
-                if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
-                    err_type = "rate_limit"
-                elif "413" in err_str or "token" in err_str.lower() or "context" in err_str.lower():
-                    err_type = "context_too_large"
-                else:
-                    err_type = "server_error"
+                last_error = err_str
 
-                if err_type == "rate_limit" and attempt < max_attempts - 1:
-                    retry_delay = extract_retry_delay(err_str) or 4.0
-                    safe_print(f"[LLM Gemini] Rate limit hit on {current_model}. Waiting {retry_delay:.1f}s before retry {attempt+1}/{max_attempts}...")
-                    time.sleep(retry_delay)
-                    if current_model != "gemini-3.6-flash":
-                        current_model = "gemini-3.6-flash"
+                if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
+                    last_error_type = "rate_limit"
+                elif "413" in err_str or "token" in err_str.lower() or "context" in err_str.lower():
+                    last_error_type = "context_too_large"
+                elif "404" in err_str or "not found" in err_str.lower():
+                    last_error_type = "not_found"
+                else:
+                    last_error_type = "server_error"
+
+                if idx < len(candidates) - 1:
+                    next_model = candidates[idx + 1]
+                    safe_print(f"[LLM Gemini Cascade] {current_model} hit ({last_error_type}). Instant failover (0ms) to {next_model}...")
                     continue
 
-                return {
-                    "success": False,
-                    "error": f"[Gemini API Exception]: {err_str}",
-                    "error_type": err_type
-                }
-
-
-        return {"success": False, "error": "[Gemini Error]: Max retries exhausted.", "error_type": "rate_limit"}
+        return {"success": False, "error": f"[Gemini Cascade Error]: Exhausted all models. Last error: {last_error}", "error_type": last_error_type}
 
 
 
@@ -419,7 +425,7 @@ def call_with_fallback(
     messages: Optional[List[Dict[str, Any]]] = None,
     prompt: Optional[str] = None,
     system_instruction: Optional[str] = None,
-    primary_provider: str = "groq",
+    primary_provider: str = "gemini",
     primary_model: Optional[str] = None,
     fallback_provider: str = "gemini",
     fallback_model: Optional[str] = None,
@@ -429,9 +435,9 @@ def call_with_fallback(
     category: str = "general"
 ) -> str:
     """
-    Stage 1 Research Centralized Fallback Router.
-    Pre-flight checks LLMBudgetManager, tries primary provider, and fails over to
-    fallback provider on rate limits while updating global run token and call telemetry.
+    Centralized 100% Gemini Zero-Sleep Multi-Model Router.
+    Pre-flight checks LLMBudgetManager, attempts generation via primary Gemini model,
+    and instantly fails over (0ms delay) across candidate Gemini model quotas.
     """
     if budget is not None:
         check_res = budget.check_preflight(category=category)
@@ -445,89 +451,81 @@ def call_with_fallback(
         system_instruction=system_instruction
     )
 
-    # 1. Try Primary Provider
-    p_prov = REGISTRY.get(primary_provider)
-    res = p_prov.generate(
+    # Candidate cascade from config or parameters
+    cascade_models = []
+    if primary_model:
+        cascade_models.append(primary_model)
+    if fallback_model and fallback_model not in cascade_models:
+        cascade_models.append(fallback_model)
+
+    default_cascade = ["gemini-3.1-flash-lite", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-2.5-flash", "gemini-3.7-flash"]
+    for m in default_cascade:
+        if m not in cascade_models:
+            cascade_models.append(m)
+
+    g_prov = REGISTRY.get("gemini")
+    res = g_prov.generate(
         messages=canonical_messages,
         model=primary_model,
+        model_candidates=cascade_models,
         temperature=temperature,
         max_tokens=max_tokens
     )
 
     if res["success"]:
+        text = sanitize_scientific_markdown(res["text"])
         if budget is not None:
-            # Estimate token metrics if exact headers unavailable
             in_tok = len(str(canonical_messages)) // 4
-            out_tok = len(res["text"]) // 4
+            out_tok = len(text) // 4
             budget.record_call(category=category, input_tokens=in_tok, output_tokens=out_tok, is_retry=False, is_fallback=False)
-        return res["text"]
+        return text
 
-    error_type = res.get("error_type", "other")
-    p_err = res.get("error", f"Unknown {primary_provider} error")
-
-    # If context too large, try compressed prompt with primary first
-    if error_type == "context_too_large":
-        compressed_msgs = compress_canonical_messages(canonical_messages, max_msg_chars=2500)
-        res_trim = p_prov.generate(
-            messages=compressed_msgs,
-            model=primary_model,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
-        if res_trim["success"]:
-            if budget is not None:
-                in_tok = len(str(compressed_msgs)) // 4
-                out_tok = len(res_trim["text"]) // 4
-                budget.record_call(category=category, input_tokens=in_tok, output_tokens=out_tok, is_retry=True, is_fallback=False)
-            return res_trim["text"]
-
-    # 2. Check if Fallback Provider is available
-    fallback_key = os.getenv("GEMINI_API_KEY") if fallback_provider == "gemini" else os.getenv("GROQ_API_KEY")
-    if fallback_key:
-        safe_print(f"[LLM Router] {primary_provider.capitalize()} unavailable ({error_type}: {p_err[:80]}...). Failing over to {fallback_provider.capitalize()}.")
-        time.sleep(2.0)  # Brief delay ONLY when fallback is activated
-
-        fb_prov = REGISTRY.get(fallback_provider)
-        fb_payload = compress_canonical_messages(canonical_messages, max_msg_chars=3500)
-        fb_res = fb_prov.generate(
-            messages=fb_payload,
-            model=fallback_model,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
-
-        if fb_res["success"]:
-            if budget is not None:
-                in_tok = len(str(fb_payload)) // 4
-                out_tok = len(fb_res["text"]) // 4
-                budget.record_call(category=category, input_tokens=in_tok, output_tokens=out_tok, is_retry=False, is_fallback=True)
-            return fb_res["text"]
-
-        safe_print(f"[LLM Router] {fallback_provider.capitalize()} fallback unavailable. Returning error.")
-        return f"[LLM Provider Failure]: Primary ({primary_provider}) error: {p_err} | Fallback ({fallback_provider}) error: {fb_res.get('error')}"
-
-    return p_err
+    return res.get("error", "[Gemini Cascade Failure]")
 
 
 def sanitize_scientific_markdown(text: str) -> str:
     """
-    Sanitize LaTeX formulas and Markdown formatting:
-    1. Fix invalid non-standard LaTeX macros like \\left\\round ... \\right\\round -> \\text{round}\\left( ... \\right)
-    2. Fix double comma artifacts in clamp functions.
-    3. Clean up unclosed math block formatting.
+    Sanitize LaTeX formulas, Markdown formatting, and strip internal LLM reasoning preambles:
+    1. Normalize Mathematical Alphanumeric Unicode Symbols (U+1D400-U+1D7FF) to standard ASCII.
+    2. Strip internal LLM reasoning/thinking preambles (e.g., <think>...</think>, "Here's a thinking process: ...").
+    3. Fix invalid non-standard LaTeX macros like \\left\\round ... \\right\\round -> \\text{round}\\left( ... \\right)
+    4. Fix double comma artifacts in clamp functions.
+    5. Clean up unclosed math block formatting.
     """
-    if not text:
-        return text
+    if not text or not isinstance(text, str):
+        return text or ""
 
-    # Fix invalid \left\round / \right\round macros
+    # 0. Normalize Mathematical Alphanumeric Unicode Symbols (U+1D400-U+1D7FF) to standard ASCII
+    try:
+        text = unicodedata.normalize("NFKC", text)
+    except Exception:
+        pass
+
+    # 1. Strip closed <think>...</think> and <thought>...</thought> blocks
+    text = re.sub(r"(?si)<think>.*?</think>", "", text)
+    text = re.sub(r"(?si)<thought>.*?</thought>", "", text)
+
+    # 2. Strip unclosed <think> or leading thinking preambles up to actual content
+    text = re.sub(r"(?si)^\s*<think>.*?(?=\n+#|\n+[A-Z0-9][a-zA-Z0-9\s–—\-]{2,}\n|\n+Node\.js|\n+Revised Report|\Z)", "", text)
+    text = re.sub(r"(?si)^\s*Here'?s\s+(?:a\s+)?thinking\s+process:.*?(?=\n+#|\n+[A-Z0-9][a-zA-Z0-9\s–—\-]{2,}\n|\n+Node\.js|\n+Revised Report|\Z)", "", text)
+    text = re.sub(r"(?si)^\s*Thinking\s+Process:.*?(?=\n+#|\n+[A-Z0-9][a-zA-Z0-9\s–—\-]{2,}\n|\n+Node\.js|\n+Revised Report|\Z)", "", text)
+    text = re.sub(r"(?si)^\s*Analyze\s+User\s+Input:.*?(?=\n+#|\n+[A-Z0-9][a-zA-Z0-9\s–—\-]{2,}\n|\n+Node\.js|\n+Revised Report|\Z)", "", text)
+
+    # 3. Fix invalid \left\round / \right\round macros
     text = re.sub(r'\\left\\round\s*', r'\\text{round}\\left(', text)
     text = re.sub(r'\\right\\round\s*', r'\\right)', text)
     text = re.sub(r'\\round\b', r'\\text{round}', text)
 
-    # Fix double commas in clamped formulas: clamp(..., , 0, , 2^n - 1)
+    # 4. Fix double commas in clamped formulas: clamp(..., , 0, , 2^n - 1)
     text = re.sub(r',\s*,', ',', text)
 
-    return text
+    # 5. Normalize malformed model-generated LaTeX (escaped underscores, asterisk subscripts)
+    text = re.sub(r'\\_\{([^}]+)\}', r'_{\1}', text)
+    text = re.sub(r'\\_([a-zA-Z0-9]+)', r'_\1', text)
+    text = re.sub(r'([a-zA-Z0-9\}])\s*\*\{([^}]+)\}', r'\1_{\2}', text)
+    text = re.sub(r'([a-zA-Z0-9\}])\s*\*([a-zA-Z0-9]+)', r'\1_\2', text)
+
+    return text.strip()
 
 
 def _is_truncated_response(text: str) -> bool:

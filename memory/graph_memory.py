@@ -293,10 +293,10 @@ class KnowledgeGraphMemory:
             )
             raw_res = config.call_with_fallback(
                 prompt=prompt,
-                primary_provider="groq",
-                primary_model=config.DEFAULT_FLASH_MODEL,
+                primary_provider="gemini",
+                primary_model=config.GEMINI_RESEARCH_MODEL,
                 fallback_provider="gemini",
-                fallback_model=config.GEMINI_RESEARCH_MODEL,
+                fallback_model="gemini-2.0-flash-lite",
                 temperature=0.1,
                 max_tokens=600,
                 budget=budget,
